@@ -1,0 +1,15 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Go: Run server",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/server",   
+      "cwd": "${workspaceFolder}",               
+      "envFile": "${workspaceFolder}/.env",         
+      "env": { "APP_JWT_SECRET": "dev-secret" }    
+    }
+  ]
+}
