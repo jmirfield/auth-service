@@ -24,7 +24,7 @@ func newTestMgr(t *testing.T, opts ...func(*Config)) *Manager {
 	for _, o := range opts {
 		o(cfg)
 	}
-	mgr, err := New(cfg)
+	mgr, err := NewManager(cfg)
 	if err != nil {
 		t.Fatalf("New manager: %v", err)
 	}

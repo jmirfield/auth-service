@@ -2,10 +2,8 @@ package handlers
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 
-	"github.com/golang-jwt/jwt/v5"
 	httpx "github.com/jmirfield/auth-service/internals/http"
 	"github.com/jmirfield/auth-service/internals/session"
 	"github.com/jmirfield/auth-service/internals/storage"
@@ -34,16 +32,12 @@ func (h *SessionHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 
 	var in refreshReq
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.RefreshToken == "" {
-		httpx.Error(w, http.StatusBadRequest, "missing refresh_token")
+		httpx.Error(w, http.StatusBadRequest, "missing refresh token")
 		return
 	}
 
 	claims, err := h.m.ParseRefresh(in.RefreshToken)
 	if err != nil {
-		if errors.Is(err, jwt.ErrTokenExpired) {
-			httpx.Error(w, http.StatusUnauthorized, "refresh token expired")
-			return
-		}
 		httpx.Error(w, http.StatusUnauthorized, "invalid refresh token")
 		return
 	}
@@ -60,14 +54,20 @@ func (h *SessionHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if rec.RefreshToken != "" && rec.RefreshToken != in.RefreshToken {
-		httpx.Error(w, http.StatusUnauthorized, "invalid or rotated refresh token")
+	if len(rec.RefreshTokens) <= 0 {
+		httpx.Error(w, http.StatusUnauthorized, "invalid refresh token")
+		return
+	}
+
+	_, found := rec.FindRefreshToken(in.RefreshToken)
+	if !found {
+		httpx.Error(w, http.StatusUnauthorized, "invalid refresh token")
 		return
 	}
 
 	newAccess, newRefresh, err := h.m.RefreshFrom(in.RefreshToken, nil, true)
 	if err != nil {
-		httpx.Error(w, http.StatusUnauthorized, "invalid or expired refresh token")
+		httpx.Error(w, http.StatusUnauthorized, "invalid refresh token")
 		return
 	}
 
@@ -77,7 +77,55 @@ func (h *SessionHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *SessionHandler) Revoke(w http.ResponseWriter, r *http.Request) {
+type revokeReq struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
+func (h *SessionHandler) RevokeSingle(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	uid, ok := httpx.UserIDFromContext(ctx)
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "user not found or disabled")
+		return
+	}
+
+	var in revokeReq
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "missing refresh token")
+		return
+	}
+
+	claims, err := h.m.ParseRefresh(in.RefreshToken)
+	if err != nil {
+		httpx.NoContent(w)
+		return
+	}
+
+	if claims.UserID != uid {
+		httpx.NoContent(w)
+		return
+	}
+
+	_, err = h.s.Update(ctx, uid, func(rec storage.Record) storage.Record {
+		out := rec.RefreshTokens[:0]
+		for _, rt := range rec.RefreshTokens {
+			if rt.JTI == claims.ID {
+				continue
+			}
+			out = append(out, rt)
+		}
+		rec.RefreshTokens = out
+		return rec
+	})
+	if err != nil {
+		httpx.InternalServerError(w)
+		return
+	}
+
+	httpx.NoContent(w)
+}
+
+func (h *SessionHandler) RevokeAll(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	uid, ok := httpx.UserIDFromContext(ctx)
 	if !ok {
@@ -86,7 +134,7 @@ func (h *SessionHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err := h.s.Update(ctx, uid, func(rec storage.Record) storage.Record {
-		rec.RefreshToken = ""
+		rec.RefreshTokens = nil
 		return rec
 	})
 	if err != nil {
@@ -94,5 +142,5 @@ func (h *SessionHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpx.Json(w, http.StatusOK, "")
+	httpx.NoContent(w)
 }

@@ -2,27 +2,8 @@ package storage
 
 import (
 	"context"
-	"errors"
+	"time"
 )
-
-const (
-	ProviderApple  = "apple"
-	ProviderGoogle = "google"
-	// add more as needed
-)
-
-var ErrNotFound = errors.New("record not found")
-
-type Tokens struct {
-	RefreshToken string `json:"refresh_token,omitempty"`
-}
-
-type Record struct {
-	UserID           string            `json:"user_id"`
-	TokensByProvider map[string]Tokens `json:"tokens_by_provider,omitempty"`
-	RefreshToken     string            `json:"refresh_token,omitempty"`
-	Attrs            map[string]string `json:"attributes,omitempty"`
-}
 
 type Store interface {
 	// Get returns the user's record or ErrNotFound.
@@ -36,4 +17,6 @@ type Store interface {
 
 	Delete(ctx context.Context, userID string) error
 	Exists(ctx context.Context, refreshToken string) (bool, error)
+
+	PruneAllExpired(ctx context.Context, now time.Time) (pruned int, err error)
 }

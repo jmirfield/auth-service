@@ -18,3 +18,7 @@ func Error(w http.ResponseWriter, status int, msg string) {
 func InternalServerError(w http.ResponseWriter) {
 	Error(w, http.StatusInternalServerError, "something went wrong")
 }
+
+func NoContent(w http.ResponseWriter) {
+	w.WriteHeader(http.StatusNoContent)
+}

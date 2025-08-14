@@ -4,6 +4,7 @@ import (
 	"context"
 	"maps"
 	"sync"
+	"time"
 )
 
 type MemoryStore struct {
@@ -18,7 +19,7 @@ func NewMemoryStore() Store {
 func (s *MemoryStore) Put(_ context.Context, userID string, r Record) error {
 	s.mu.Lock()
 	r.UserID = userID
-	ensureInit(&r)
+	r.EnsureInit()
 	s.data[userID] = deepCopyRecord(r)
 	s.mu.Unlock()
 	return nil
@@ -31,6 +32,7 @@ func (s *MemoryStore) Get(_ context.Context, userID string) (Record, error) {
 	if !ok {
 		return Record{}, ErrNotFound
 	}
+
 	return deepCopyRecord(r), nil
 }
 
@@ -42,12 +44,12 @@ func (s *MemoryStore) Update(_ context.Context, userID string, fn func(Record) R
 		curr = deepCopyRecord(existing)
 	} else {
 		curr = Record{UserID: userID}
-		ensureInit(&curr)
+		curr.EnsureInit()
 	}
 
 	next := fn(curr)
 	next.UserID = userID
-	ensureInit(&next)
+	next.EnsureInit()
 
 	stored := deepCopyRecord(next)
 	s.data[userID] = stored
@@ -70,18 +72,34 @@ func (s *MemoryStore) Exists(_ context.Context, userID string) (bool, error) {
 	return ok, nil
 }
 
-func ensureInit(r *Record) {
-	if r.TokensByProvider == nil {
-		r.TokensByProvider = make(map[string]Tokens)
+func (s *MemoryStore) PruneAllExpired(_ context.Context, now time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	total := 0
+	for uid, rec := range s.data {
+		before := len(rec.RefreshTokens)
+		out := rec.RefreshTokens[:0]
+		for _, rt := range rec.RefreshTokens {
+			if rt.ExpiresAt.After(now) {
+				out = append(out, rt)
+			}
+		}
+		rec.RefreshTokens = out
+		s.data[uid] = rec
+		total += before - len(out)
 	}
-	if r.Attrs == nil {
-		r.Attrs = make(map[string]string)
-	}
+	return total, nil
 }
 
+// internals/storage/memory.go (add slice copy)
 func deepCopyRecord(r Record) Record {
 	out := r
-	out.TokensByProvider = maps.Clone(r.TokensByProvider)
+	out.RefreshTokensByProvider = maps.Clone(r.RefreshTokensByProvider)
 	out.Attrs = maps.Clone(r.Attrs)
+	if r.RefreshTokens != nil {
+		out.RefreshTokens = make([]RefreshTokenRecord, len(r.RefreshTokens))
+		copy(out.RefreshTokens, r.RefreshTokens)
+	}
 	return out
 }

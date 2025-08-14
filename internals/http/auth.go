@@ -11,6 +11,7 @@ import (
 type ctxKey string
 
 const userIDCtxKey ctxKey = "session_user_id"
+const sessionClaimsCtxKey ctxKey = "session_claims"
 
 type Auth struct {
 	m *session.Manager
@@ -46,6 +47,7 @@ func (a *Auth) Middleware(next http.Handler) http.Handler {
 		}
 
 		ctx := context.WithValue(r.Context(), userIDCtxKey, claims.UserID)
+		ctx = context.WithValue(ctx, sessionClaimsCtxKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -53,4 +55,9 @@ func (a *Auth) Middleware(next http.Handler) http.Handler {
 func UserIDFromContext(ctx context.Context) (string, bool) {
 	uid, ok := ctx.Value(userIDCtxKey).(string)
 	return uid, ok && uid != ""
+}
+
+func ClaimsFromContext(ctx context.Context) (*session.Claims, bool) {
+	claims, ok := ctx.Value(sessionClaimsCtxKey).(*session.Claims)
+	return claims, ok
 }

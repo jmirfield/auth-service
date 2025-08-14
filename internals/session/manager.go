@@ -31,11 +31,7 @@ type Manager struct {
 	clockSkewLeeway time.Duration
 }
 
-func New(cfg *Config) (*Manager, error) {
-	if err := cfg.Validate(); err != nil {
-		return nil, err
-	}
-
+func NewManager(cfg *Config) (*Manager, error) {
 	return &Manager{
 		secret:          []byte(cfg.Secret),
 		issuer:          cfg.Issuer,
@@ -59,10 +55,12 @@ func (m *Manager) IssuePair(userID string, attrs map[string]string) (access stri
 	if err != nil {
 		return "", "", err
 	}
+
 	refresh, err = m.IssueRefresh(userID)
 	if err != nil {
 		return "", "", err
 	}
+
 	return access, refresh, nil
 }
 
@@ -70,6 +68,7 @@ func (m *Manager) issue(userID string, attrs map[string]string, typ string, ttl 
 	if userID == "" {
 		return "", errors.New("empty userID")
 	}
+
 	now := time.Now()
 
 	rc := jwt.RegisteredClaims{
@@ -98,6 +97,7 @@ func newJTI() string {
 		// extremely unlikely; fall back to time-based
 		return base64.RawURLEncoding.EncodeToString([]byte(time.Now().Format(time.RFC3339Nano)))
 	}
+
 	return base64.RawURLEncoding.EncodeToString(b[:])
 }
 
@@ -114,16 +114,19 @@ func (m *Manager) RefreshFrom(refreshToken string, attrs map[string]string, rota
 	if err != nil {
 		return "", "", err
 	}
+
 	newAccess, err = m.IssueAccess(refreshClaims.UserID, attrs)
 	if err != nil {
 		return "", "", err
 	}
+
 	if rotate {
 		newRefresh, err = m.IssueRefresh(refreshClaims.UserID)
 		if err != nil {
 			return "", "", err
 		}
 	}
+
 	return newAccess, newRefresh, nil
 }
 
@@ -136,10 +139,12 @@ func (m *Manager) parseTyped(tokenString, wantType string) (*Claims, error) {
 		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
 		jwt.WithLeeway(m.clockSkewLeeway),
 	)
+
 	claims := &Claims{}
 	_, err := parser.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {
 		return m.secret, nil
 	})
+
 	if err != nil {
 		return nil, err
 	}
@@ -147,12 +152,15 @@ func (m *Manager) parseTyped(tokenString, wantType string) (*Claims, error) {
 	if m.issuer != "" && claims.Issuer != m.issuer {
 		return nil, errors.New("invalid issuer")
 	}
+
 	if m.audience != "" && !slices.Contains(claims.Audience, m.audience) {
 		return nil, errors.New("invalid audience")
 	}
+
 	if claims.TokenType != wantType {
 		return nil, errors.New("invalid token type")
 	}
+
 	if claims.UserID == "" {
 		return nil, errors.New("missing uid")
 	}

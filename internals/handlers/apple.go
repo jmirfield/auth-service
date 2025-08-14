@@ -6,22 +6,26 @@ import (
 
 	"github.com/jmirfield/auth-service/internals/apple"
 	httpx "github.com/jmirfield/auth-service/internals/http"
+	"github.com/jmirfield/auth-service/internals/secret"
 	"github.com/jmirfield/auth-service/internals/session"
 	"github.com/jmirfield/auth-service/internals/storage"
 )
 
 type AppleHandler struct {
-	c *apple.Config
-	s storage.Store
-	m *session.Manager
+	c   *apple.Config
+	s   storage.Store
+	sm  *session.Manager
+	am  *apple.Manager
+	scm *secret.Manager
 }
 
-func NewAppleHandler(cfg *apple.Config, store storage.Store, mgr *session.Manager) *AppleHandler {
-	return &AppleHandler{c: cfg, s: store, m: mgr}
+func NewAppleHandler(cfg *apple.Config, store storage.Store, mgr *session.Manager, am *apple.Manager, scm *secret.Manager) *AppleHandler {
+	return &AppleHandler{c: cfg, s: store, sm: mgr, am: am, scm: scm}
 }
 
 type appleAuthReq struct {
-	Code string `json:"code"`
+	Code  string `json:"code"`
+	Nonce string `json:"nonce,omitempty"`
 }
 
 type authResponse struct {
@@ -38,48 +42,51 @@ func (h *AppleHandler) Auth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1) Exchange authorization code with Apple
-	tok, err := apple.ExchangeCode(h.c, in.Code)
+	tok, err := h.am.ExchangeCode(in.Code)
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, http.StatusBadRequest, "bad code")
 		return
 	}
 
-	// 2) Verify the ID token
-	var claims *apple.AppleClaims
-	claims, err = apple.VerifyIDToken(h.c, tok.IDToken)
-
+	var claims *apple.Claims
+	claims, err = h.am.VerifyIDToken(tok.IDToken, in.Nonce)
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "invalid id_token")
+		httpx.Error(w, http.StatusBadRequest, "invalid id token")
 		return
 	}
 
-	// 3) Derive stable user key
-	userID := "apple:" + claims.Subject
-
-	// 4) Issue YOUR session tokens (access + refresh)
-	appAccess, appRefresh, err := h.m.IssuePair(userID, nil)
+	userID := claims.Subject
+	appAccess, appRefresh, err := h.sm.IssuePair(userID, nil)
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "failed to issue session tokens")
+		httpx.InternalServerError(w)
 		return
 	}
 
-	// 5) Persist minimal provider state + useful attributes
+	rClaims, err := h.sm.ParseRefresh(appRefresh)
+	if err != nil {
+		httpx.InternalServerError(w)
+		return
+	}
+
+	enctok, err := h.scm.Encrypt(tok.RefreshToken)
+	if err != nil {
+		httpx.InternalServerError(w)
+		return
+	}
+
 	if _, err := h.s.Update(ctx, userID, func(rec storage.Record) storage.Record {
 		rec.UserID = userID
-		if rec.TokensByProvider == nil {
-			rec.TokensByProvider = make(map[string]storage.Tokens)
-		}
-
-		rec.TokensByProvider[storage.ProviderApple] = storage.Tokens{
-			RefreshToken: tok.RefreshToken,
-		}
-
-		rec.RefreshToken = appRefresh
+		rec.RefreshTokensByProvider[storage.ProviderApple] = enctok
+		rec.RefreshTokens = append(rec.RefreshTokens, storage.RefreshTokenRecord{
+			Hash:      secret.Hash(appRefresh),
+			JTI:       rClaims.ID,
+			ExpiresAt: rClaims.ExpiresAt.Time,
+			CreatedAt: rClaims.IssuedAt.Time,
+		})
 
 		return rec
 	}); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "failed to persist tokens")
+		httpx.InternalServerError(w)
 		return
 	}
 

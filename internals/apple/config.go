@@ -47,24 +47,32 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	block, _ := pem.Decode(pemBytes)
 	if block == nil {
 		return nil, errors.New("failed to parse PEM block")
 	}
+
 	privAny, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
 		return nil, err
 	}
+
 	ecdsaKey, ok := privAny.(*ecdsa.PrivateKey)
 	if !ok {
 		return nil, errors.New("private key is not ECDSA")
 	}
 
-	return &Config{
+	cfg := &Config{
 		TeamID:        team,
 		ClientID:      client,
 		KeyID:         kid,
 		PrivateKey:    ecdsaKey,
 		PrivateKeyPEM: pemBytes,
-	}, nil
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
 }

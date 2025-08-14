@@ -38,17 +38,18 @@ var (
 )
 
 func fetchApplePublicKey(ctx context.Context, kid string) (*rsa.PublicKey, error) {
-	// Fast path: cached and fresh.
 	if key := getCachedKey(kid); key != nil {
 		return key, nil
 	}
-	// Refresh cache.
+
 	if err := refreshJWKS(ctx); err != nil {
 		return nil, err
 	}
+
 	if key := getCachedKey(kid); key != nil {
 		return key, nil
 	}
+
 	return nil, errors.New("public key not found for kid")
 }
 
@@ -58,6 +59,7 @@ func getCachedKey(kid string) *rsa.PublicKey {
 	if time.Since(jwksCache.fetched) < jwksCache.ttl && jwksCache.keys != nil {
 		return jwksCache.keys[kid]
 	}
+
 	return nil
 }
 
@@ -65,7 +67,6 @@ func refreshJWKS(ctx context.Context) error {
 	jwksCache.Lock()
 	defer jwksCache.Unlock()
 
-	// If still fresh (maybe another goroutine refreshed), skip.
 	if time.Since(jwksCache.fetched) < jwksCache.ttl && jwksCache.keys != nil {
 		return nil
 	}
@@ -76,6 +77,7 @@ func refreshJWKS(ctx context.Context) error {
 		return err
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode/100 != 2 {
 		return errors.New("jwks fetch failed: non-2xx")
 	}
@@ -96,6 +98,7 @@ func refreshJWKS(ctx context.Context) error {
 		}
 		keys[k.Kid] = pub
 	}
+
 	if len(keys) == 0 {
 		return errors.New("empty JWKS")
 	}
@@ -110,10 +113,12 @@ func jwkToRSA(nB64url, eB64url string) (*rsa.PublicKey, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	eb, err := base64.RawURLEncoding.DecodeString(eB64url)
 	if err != nil {
 		return nil, err
 	}
+
 	n := new(big.Int).SetBytes(nb)
 
 	// Exponent is small; convert bytes to int.
@@ -121,6 +126,7 @@ func jwkToRSA(nB64url, eB64url string) (*rsa.PublicKey, error) {
 	for _, b := range eb {
 		e = e<<8 | int(b)
 	}
+
 	if e == 0 {
 		return nil, errors.New("invalid exponent")
 	}

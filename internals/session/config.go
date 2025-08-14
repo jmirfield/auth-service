@@ -69,5 +69,9 @@ func Load() (*Config, error) {
 		}
 	}
 
-	return cfg, cfg.Validate()
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
 }
