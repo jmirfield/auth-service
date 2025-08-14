@@ -5,6 +5,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/jmirfield/auth-service/internals/apple"
@@ -16,6 +18,9 @@ import (
 )
 
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	appleCfg, err := apple.Load()
 	if err != nil {
 		log.Fatal(err)
@@ -47,6 +52,21 @@ func main() {
 	}
 
 	var store = storage.NewMemoryStore()
+	go func(ctx context.Context) {
+		t := time.NewTicker(12 * time.Hour)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				if n, err := store.PruneAllExpired(ctx, time.Now()); err == nil && n > 0 {
+					log.Printf("pruned %d expired refresh tokens", n)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}(ctx)
+
 	var sessionHandler = handlers.NewSessionHandler(sessionMgr, store)
 	var appleHandler = handlers.NewAppleHandler(appleCfg, store, sessionMgr, appleMgr, secretMgr)
 	var authMiddleware = authhttp.NewAuth(sessionMgr).Middleware
@@ -57,20 +77,19 @@ func main() {
 	mux.Handle("POST /auth/revoke", authMiddleware(http.HandlerFunc(sessionHandler.RevokeSingle)))
 	mux.Handle("POST /auth/revoke/all", authMiddleware(http.HandlerFunc(sessionHandler.RevokeAll)))
 
-	go func() {
-		t := time.NewTicker(12 * time.Hour)
-		defer t.Stop()
-		for range t.C {
-			if n, err := store.PruneAllExpired(context.Background(), time.Now()); err == nil && n > 0 {
-				log.Printf("pruned %d expired refresh tokens", n)
-			}
-		}
-	}()
-
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "3000"
 	}
-	log.Println("Listening on :" + port)
-	log.Fatal(http.ListenAndServe(":"+port, mux))
+
+	srv := &http.Server{Addr: ":" + port, Handler: mux}
+	go func() {
+		log.Println("Listening on :" + port)
+		log.Fatal(srv.ListenAndServe())
+	}()
+
+	<-ctx.Done()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_ = srv.Shutdown(shutdownCtx)
 }
