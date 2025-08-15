@@ -7,7 +7,6 @@ A small Go service for handling **Sign in with Apple** on the backend, verifying
 ## Features
 
 - Exchange Apple authorization code for tokens.
-- Verify Apple `id_token` (signature + claims).
 - Store Apple refresh token securely.
 - Issue your own **short-lived access** and **long-lived refresh** JWTs.
 - Refresh and revoke sessions.
@@ -30,7 +29,7 @@ A small Go service for handling **Sign in with Apple** on the backend, verifying
 ## Environment Variables
 
 ```env
-# Apple
+# APPLE CONFIG
 APPLE_TEAM_ID=YOUR_TEAM_ID
 APPLE_CLIENT_ID=com.example.serviceid.or.bundleid
 APPLE_KEY_ID=ABC123DEF
@@ -44,11 +43,13 @@ APP_JWT_ACCESS_LIFETIME=15m
 APP_JWT_REFRESH_LIFETIME=720h
 APP_JWT_CLOCK_SKEW_LEEWAY=60s
 
+# SECRETS CONFIG
+SECRET_ENC_KEY=akojrJmt29/0yT5RQ3SXihF1q0k0qYqUDg7WusrzBL0= <- Must be 32 bytes b64
+SECRET_PREFIX=my-app
+
 # Server
 PORT=3000
 ```
 
 ## TODO
-- Dockerfile
 - CI/CD Builds 
-- Tests
