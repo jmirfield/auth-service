@@ -20,10 +20,10 @@ type Manager struct {
 	config *Config
 }
 
-func NewManager(cfg *Config) (*Manager, error) {
+func NewManager(cfg *Config) *Manager {
 	return &Manager{
 		config: cfg,
-	}, nil
+	}
 }
 
 type Claims struct {

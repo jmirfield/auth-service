@@ -31,7 +31,7 @@ type Manager struct {
 	clockSkewLeeway time.Duration
 }
 
-func NewManager(cfg *Config) (*Manager, error) {
+func NewManager(cfg *Config) *Manager {
 	return &Manager{
 		secret:          []byte(cfg.Secret),
 		issuer:          cfg.Issuer,
@@ -39,7 +39,7 @@ func NewManager(cfg *Config) (*Manager, error) {
 		accessTTL:       cfg.AccessLifetime,
 		refreshTTL:      cfg.RefreshLifetime,
 		clockSkewLeeway: cfg.ClockSkewLeeway,
-	}, nil
+	}
 }
 
 func (m *Manager) IssueAccess(userID string, attrs map[string]string) (string, error) {

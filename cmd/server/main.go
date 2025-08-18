@@ -36,20 +36,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	sessionMgr, err := session.NewManager(sessionCfg)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	appleMgr, err := apple.NewManager(appleCfg)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	secretMgr, err := secret.NewManager(secretCfg)
-	if err != nil {
-		log.Fatal(err)
-	}
+	sessionMgr := session.NewManager(sessionCfg)
+	appleMgr := apple.NewManager(appleCfg)
+	secretMgr := secret.NewManager(secretCfg)
 
 	var store = storage.NewMemoryStore()
 	go func(ctx context.Context) {
@@ -72,10 +61,10 @@ func main() {
 	var authMiddleware = authhttp.NewAuth(sessionMgr).Middleware
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /auth/refresh", sessionHandler.Refresh)
-	mux.HandleFunc("POST /auth/apple", appleHandler.Auth)
-	mux.Handle("POST /auth/revoke", authMiddleware(http.HandlerFunc(sessionHandler.RevokeSingle)))
-	mux.Handle("POST /auth/revoke/all", authMiddleware(http.HandlerFunc(sessionHandler.RevokeAll)))
+	mux.HandleFunc("POST /idp/apple", appleHandler.Auth)
+	mux.HandleFunc("POST /token/refresh", sessionHandler.Refresh)
+	mux.Handle("POST /token/revoke", authMiddleware(http.HandlerFunc(sessionHandler.RevokeSingle)))
+	mux.Handle("POST /token/revoke/all", authMiddleware(http.HandlerFunc(sessionHandler.RevokeAll)))
 
 	port := os.Getenv("PORT")
 	if port == "" {

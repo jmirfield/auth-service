@@ -13,13 +13,10 @@ var testKey32 = bytes.Repeat([]byte{0xAB}, 32)
 
 func newMgr(t *testing.T) *Manager {
 	t.Helper()
-	m, err := NewManager(&Config{
+	m := NewManager(&Config{
 		Key:    testKey32,
 		Prefix: "gcm:v1",
 	})
-	if err != nil {
-		t.Fatalf("New manager: %v", err)
-	}
 	return m
 }
 
