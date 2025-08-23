@@ -87,7 +87,7 @@ services:
 
 ## API Endpoints
 
-- `POST /idp/apple`  
+- `POST /token/apple`  
   Exchange Apple authorization code, verify ID token, upsert user/identity, issue app tokens.  
   **Response:** `{ "access_token": "...", "refresh_token": "..." }`
 
@@ -100,3 +100,10 @@ services:
 - `POST /token/revoke/all` *(auth required)*  
   Revoke all refresh tokens for the current user.
 
+## TODO
+Add auth support for:
+- Google
+- Microsoft
+- Others?
+
+Add logging****
