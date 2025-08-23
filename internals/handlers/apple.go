@@ -2,25 +2,48 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/jmirfield/auth-service/internals/apple"
+	"github.com/jmirfield/auth-service/internals/domain/user"
 	httpx "github.com/jmirfield/auth-service/internals/http"
+	"github.com/jmirfield/auth-service/internals/repository"
 	"github.com/jmirfield/auth-service/internals/secret"
 	"github.com/jmirfield/auth-service/internals/session"
-	"github.com/jmirfield/auth-service/internals/storage"
 )
 
 type AppleHandler struct {
-	c   *apple.Config
-	s   storage.Store
-	sm  *session.Manager
-	am  *apple.Manager
-	scm *secret.Manager
+	cfg  *apple.Config
+	repo repository.UserReadWriter
+	sm   *session.Manager
+	am   *apple.Manager
+	scm  *secret.Manager
 }
 
-func NewAppleHandler(cfg *apple.Config, store storage.Store, mgr *session.Manager, am *apple.Manager, scm *secret.Manager) *AppleHandler {
-	return &AppleHandler{c: cfg, s: store, sm: mgr, am: am, scm: scm}
+func NewAppleHandler(cfg *apple.Config, ur repository.UserReadWriter, mgr *session.Manager, am *apple.Manager, scm *secret.Manager) (*AppleHandler, error) {
+	if cfg == nil {
+		return nil, errors.New("missing config")
+	}
+
+	if ur == nil {
+		return nil, errors.New("missing user repository")
+	}
+
+	if mgr == nil {
+		return nil, errors.New("missing session manager")
+	}
+
+	if am == nil {
+		return nil, errors.New("missing apple manager")
+	}
+
+	if scm == nil {
+		return nil, errors.New("missing secret manager")
+	}
+
+	return &AppleHandler{cfg: cfg, repo: ur, sm: mgr, am: am, scm: scm}, nil
 }
 
 type appleAuthReq struct {
@@ -55,8 +78,32 @@ func (h *AppleHandler) Auth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := claims.Subject
-	appAccess, appRefresh, err := h.sm.IssuePair(userID, nil)
+	ident, err := h.repo.GetIdentityBySub(ctx, claims.Subject)
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
+		httpx.InternalServerError(w)
+		return
+	}
+
+	if ident == nil {
+		usr := &user.User{
+			ID: uuid.New(),
+		}
+
+		err := h.repo.UpsertUser(ctx, usr)
+		if err != nil {
+			httpx.InternalServerError(w)
+			return
+		}
+
+		ident = &user.Identity{
+			Uid:      usr.ID,
+			Provider: claims.Issuer,
+			Sub:      claims.Subject,
+		}
+		h.repo.UpsertIdentity(ctx, ident)
+	}
+
+	appAccess, appRefresh, err := h.sm.IssuePair(ident.Uid, nil)
 	if err != nil {
 		httpx.InternalServerError(w)
 		return
@@ -68,23 +115,16 @@ func (h *AppleHandler) Auth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	enctok, err := h.scm.Encrypt(tok.RefreshToken)
+	jtiUUID, err := uuid.Parse(rClaims.ID)
 	if err != nil {
 		httpx.InternalServerError(w)
 		return
 	}
-
-	if _, err := h.s.Update(ctx, userID, func(rec storage.Record) storage.Record {
-		rec.UserID = userID
-		rec.RefreshTokensByProvider[storage.ProviderApple] = enctok
-		rec.RefreshTokens = append(rec.RefreshTokens, storage.RefreshTokenRecord{
-			Hash:      secret.Hash(appRefresh),
-			JTI:       rClaims.ID,
-			ExpiresAt: rClaims.ExpiresAt.Time,
-			CreatedAt: rClaims.IssuedAt.Time,
-		})
-
-		return rec
+	if err := h.repo.InsertRefreshToken(ctx, &user.RefreshToken{
+		Uid:       ident.Uid,
+		Hash:      secret.Hash(appRefresh),
+		Jti:       jtiUUID,
+		ExpiresAt: rClaims.ExpiresAt.Time,
 	}); err != nil {
 		httpx.InternalServerError(w)
 		return

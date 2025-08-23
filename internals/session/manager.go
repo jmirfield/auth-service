@@ -1,13 +1,12 @@
 package session
 
 import (
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"slices"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 )
 
 const (
@@ -16,7 +15,6 @@ const (
 )
 
 type Claims struct {
-	UserID    string            `json:"uid"`
 	Attrs     map[string]string `json:"attrs,omitempty"`
 	TokenType string            `json:"token_type"`
 	jwt.RegisteredClaims
@@ -31,7 +29,10 @@ type Manager struct {
 	clockSkewLeeway time.Duration
 }
 
-func NewManager(cfg *Config) *Manager {
+func NewManager(cfg *Config) (*Manager, error) {
+	if cfg == nil {
+		return nil, errors.New("missing config")
+	}
 	return &Manager{
 		secret:          []byte(cfg.Secret),
 		issuer:          cfg.Issuer,
@@ -39,18 +40,18 @@ func NewManager(cfg *Config) *Manager {
 		accessTTL:       cfg.AccessLifetime,
 		refreshTTL:      cfg.RefreshLifetime,
 		clockSkewLeeway: cfg.ClockSkewLeeway,
-	}
+	}, nil
 }
 
-func (m *Manager) IssueAccess(userID string, attrs map[string]string) (string, error) {
+func (m *Manager) IssueAccess(userID uuid.UUID, attrs map[string]string) (string, error) {
 	return m.issue(userID, attrs, tokenTypeAccess, m.accessTTL)
 }
 
-func (m *Manager) IssueRefresh(userID string) (string, error) {
+func (m *Manager) IssueRefresh(userID uuid.UUID) (string, error) {
 	return m.issue(userID, nil, tokenTypeRefresh, m.refreshTTL)
 }
 
-func (m *Manager) IssuePair(userID string, attrs map[string]string) (access string, refresh string, err error) {
+func (m *Manager) IssuePair(userID uuid.UUID, attrs map[string]string) (access string, refresh string, err error) {
 	access, err = m.IssueAccess(userID, attrs)
 	if err != nil {
 		return "", "", err
@@ -64,41 +65,30 @@ func (m *Manager) IssuePair(userID string, attrs map[string]string) (access stri
 	return access, refresh, nil
 }
 
-func (m *Manager) issue(userID string, attrs map[string]string, typ string, ttl time.Duration) (string, error) {
-	if userID == "" {
+func (m *Manager) issue(userID uuid.UUID, attrs map[string]string, typ string, ttl time.Duration) (string, error) {
+	if userID.String() == "" {
 		return "", errors.New("empty userID")
 	}
 
 	now := time.Now()
 
 	rc := jwt.RegisteredClaims{
-		Subject:   userID,
+		Subject:   userID.String(),
 		IssuedAt:  jwt.NewNumericDate(now),
 		NotBefore: jwt.NewNumericDate(now.Add(-m.clockSkewLeeway)),
 		ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
 		Issuer:    m.issuer,
 		Audience:  jwt.ClaimStrings{m.audience},
-		ID:        newJTI(),
+		ID:        uuid.NewString(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, Claims{
-		UserID:           userID,
 		Attrs:            attrs,
 		TokenType:        typ,
 		RegisteredClaims: rc,
 	})
 
 	return token.SignedString(m.secret)
-}
-
-func newJTI() string {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		// extremely unlikely; fall back to time-based
-		return base64.RawURLEncoding.EncodeToString([]byte(time.Now().Format(time.RFC3339Nano)))
-	}
-
-	return base64.RawURLEncoding.EncodeToString(b[:])
 }
 
 func (m *Manager) ParseAccess(tokenString string) (*Claims, error) {
@@ -115,13 +105,13 @@ func (m *Manager) RefreshFrom(refreshToken string, attrs map[string]string, rota
 		return "", "", err
 	}
 
-	newAccess, err = m.IssueAccess(refreshClaims.UserID, attrs)
+	newAccess, err = m.IssueAccess(uuid.MustParse(refreshClaims.Subject), attrs)
 	if err != nil {
 		return "", "", err
 	}
 
 	if rotate {
-		newRefresh, err = m.IssueRefresh(refreshClaims.UserID)
+		newRefresh, err = m.IssueRefresh(uuid.MustParse(refreshClaims.Subject))
 		if err != nil {
 			return "", "", err
 		}
@@ -161,7 +151,7 @@ func (m *Manager) parseTyped(tokenString, wantType string) (*Claims, error) {
 		return nil, errors.New("invalid token type")
 	}
 
-	if claims.UserID == "" {
+	if claims.Subject == "" {
 		return nil, errors.New("missing uid")
 	}
 

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jmirfield/auth-service/internals/session"
 )
 
@@ -41,20 +42,20 @@ func (a *Auth) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		if claims.UserID == "" {
+		if claims.Subject == "" {
 			Error(w, http.StatusUnauthorized, "invalid claims")
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), userIDCtxKey, claims.UserID)
+		ctx := context.WithValue(r.Context(), userIDCtxKey, claims.Subject)
 		ctx = context.WithValue(ctx, sessionClaimsCtxKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-func UserIDFromContext(ctx context.Context) (string, bool) {
-	uid, ok := ctx.Value(userIDCtxKey).(string)
-	return uid, ok && uid != ""
+func UserIDFromContext(ctx context.Context) (uuid.UUID, bool) {
+	uid, ok := ctx.Value(userIDCtxKey).(uuid.UUID)
+	return uid, ok && uid.String() != ""
 }
 
 func ClaimsFromContext(ctx context.Context) (*session.Claims, bool) {

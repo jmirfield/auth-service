@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 type Config struct {
@@ -15,6 +16,8 @@ type Config struct {
 	KeyID         string
 	PrivateKey    *ecdsa.PrivateKey
 	PrivateKeyPEM []byte
+	HttpTimeout   time.Duration
+	JwkCacheTTL   time.Duration
 }
 
 func (c *Config) Validate() error {
@@ -32,6 +35,14 @@ func (c *Config) Validate() error {
 
 	if c.PrivateKey == nil {
 		return errors.New("missing required Apple private key")
+	}
+
+	if c.HttpTimeout <= 0 {
+		return errors.New("invalid Apple HTTP timeout")
+	}
+
+	if c.JwkCacheTTL <= 0 {
+		return errors.New("invalid Apple JWK cache TTL")
 	}
 
 	return nil
@@ -70,6 +81,19 @@ func Load() (*Config, error) {
 		PrivateKey:    ecdsaKey,
 		PrivateKeyPEM: pemBytes,
 	}
+
+	if s := os.Getenv("APPLE_HTTP_TIMEOUT"); s != "" {
+		if d, err := time.ParseDuration(s); err == nil && d > 0 {
+			cfg.HttpTimeout = d
+		}
+	}
+
+	if s := os.Getenv("APPLE_JWK_CACHE_TTL"); s != "" {
+		if d, err := time.ParseDuration(s); err == nil && d > 0 {
+			cfg.JwkCacheTTL = d
+		}
+	}
+
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}

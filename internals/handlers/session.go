@@ -2,20 +2,31 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
+	"github.com/google/uuid"
 	httpx "github.com/jmirfield/auth-service/internals/http"
+	"github.com/jmirfield/auth-service/internals/repository"
+	"github.com/jmirfield/auth-service/internals/secret"
 	"github.com/jmirfield/auth-service/internals/session"
-	"github.com/jmirfield/auth-service/internals/storage"
 )
 
 type SessionHandler struct {
-	m *session.Manager
-	s storage.Store
+	m    *session.Manager
+	repo repository.UserReadWriter
 }
 
-func NewSessionHandler(mgr *session.Manager, store storage.Store) *SessionHandler {
-	return &SessionHandler{m: mgr, s: store}
+func NewSessionHandler(mgr *session.Manager, repo repository.UserReadWriter) (*SessionHandler, error) {
+	if mgr == nil {
+		return nil, errors.New("missing session manager")
+	}
+
+	if repo == nil {
+		return nil, errors.New("missing user repository")
+	}
+
+	return &SessionHandler{m: mgr, repo: repo}, nil
 }
 
 type refreshReq struct {
@@ -42,25 +53,20 @@ func (h *SessionHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	uid := claims.UserID
-	if uid == "" {
+	uid, err := uuid.Parse(claims.Subject)
+	if err != nil {
 		httpx.Error(w, http.StatusUnauthorized, "invalid refresh token")
 		return
 	}
 
-	rec, err := h.s.Get(ctx, uid)
+	_, err = h.repo.GetUser(ctx, uid)
 	if err != nil {
 		httpx.Error(w, http.StatusUnauthorized, "user not found or disabled")
 		return
 	}
 
-	if len(rec.RefreshTokens) <= 0 {
-		httpx.Error(w, http.StatusUnauthorized, "invalid refresh token")
-		return
-	}
-
-	_, found := rec.FindRefreshToken(in.RefreshToken)
-	if !found {
+	_, err = h.repo.FindRefreshTokenByHash(ctx, uid, secret.Hash(in.RefreshToken))
+	if err != nil {
 		httpx.Error(w, http.StatusUnauthorized, "invalid refresh token")
 		return
 	}
@@ -101,22 +107,17 @@ func (h *SessionHandler) RevokeSingle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if claims.UserID != uid {
+	if claims.Subject != uid.String() {
 		httpx.NoContent(w)
 		return
 	}
 
-	_, err = h.s.Update(ctx, uid, func(rec storage.Record) storage.Record {
-		out := rec.RefreshTokens[:0]
-		for _, rt := range rec.RefreshTokens {
-			if rt.JTI == claims.ID {
-				continue
-			}
-			out = append(out, rt)
-		}
-		rec.RefreshTokens = out
-		return rec
-	})
+	tokenID, err := uuid.Parse(claims.ID)
+	if err != nil {
+		httpx.InternalServerError(w)
+		return
+	}
+	_, err = h.repo.DeleteRefreshToken(ctx, uid, tokenID)
 	if err != nil {
 		httpx.InternalServerError(w)
 		return
@@ -133,10 +134,7 @@ func (h *SessionHandler) RevokeAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := h.s.Update(ctx, uid, func(rec storage.Record) storage.Record {
-		rec.RefreshTokens = nil
-		return rec
-	})
+	_, err := h.repo.DeleteAllRefreshTokens(ctx, uid)
 	if err != nil {
 		httpx.InternalServerError(w)
 		return

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rsa"
 	"log"
 	"net/http"
 	"os"
@@ -9,17 +10,59 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jmirfield/auth-service/internals/apple"
+	"github.com/jmirfield/auth-service/internals/cache"
 	"github.com/jmirfield/auth-service/internals/handlers"
 	authhttp "github.com/jmirfield/auth-service/internals/http"
+	"github.com/jmirfield/auth-service/internals/repository/postgres"
 	"github.com/jmirfield/auth-service/internals/secret"
 	"github.com/jmirfield/auth-service/internals/session"
-	"github.com/jmirfield/auth-service/internals/storage"
 )
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		log.Fatal("DATABASE_URL is required")
+	}
+	pgxCfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		log.Fatalf("parse DATABASE_URL: %v", err)
+	}
+
+	pool, err := pgxpool.NewWithConfig(ctx, pgxCfg)
+	if err != nil {
+		log.Fatalf("pgxpool.New: %v", err)
+	}
+	defer pool.Close()
+
+	{
+		pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		if err := pool.Ping(pingCtx); err != nil {
+			cancel()
+			log.Fatalf("postgres ping: %v", err)
+		}
+		cancel()
+	}
+
+	var usrstore = postgres.NewUserRepo(pool)
+	go func(ctx context.Context) {
+		t := time.NewTicker(12 * time.Hour)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				if n, err := usrstore.PruneExpiredRefreshTokens(ctx, time.Now()); err == nil && n > 0 {
+					log.Printf("pruned %d expired refresh tokens", n)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}(ctx)
 
 	appleCfg, err := apple.Load()
 	if err != nil {
@@ -36,39 +79,43 @@ func main() {
 		log.Fatal(err)
 	}
 
-	sessionMgr := session.NewManager(sessionCfg)
-	appleMgr := apple.NewManager(appleCfg)
-	secretMgr := secret.NewManager(secretCfg)
+	sessionMgr, err := session.NewManager(sessionCfg)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	var store = storage.NewMemoryStore()
-	go func(ctx context.Context) {
-		t := time.NewTicker(12 * time.Hour)
-		defer t.Stop()
-		for {
-			select {
-			case <-t.C:
-				if n, err := store.PruneAllExpired(ctx, time.Now()); err == nil && n > 0 {
-					log.Printf("pruned %d expired refresh tokens", n)
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
-	}(ctx)
+	client := &http.Client{Timeout: 10 * time.Second}
+	appleMgr, err := apple.NewManager(appleCfg, cache.NewMemory[rsa.PublicKey](ctx), client)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	var sessionHandler = handlers.NewSessionHandler(sessionMgr, store)
-	var appleHandler = handlers.NewAppleHandler(appleCfg, store, sessionMgr, appleMgr, secretMgr)
-	var authMiddleware = authhttp.NewAuth(sessionMgr).Middleware
+	secretMgr, err := secret.NewManager(secretCfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	sessionHandler, err := handlers.NewSessionHandler(sessionMgr, usrstore)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	appleHandler, err := handlers.NewAppleHandler(appleCfg, usrstore, sessionMgr, appleMgr, secretMgr)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	authMiddleware := authhttp.NewAuth(sessionMgr).Middleware
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /idp/apple", appleHandler.Auth)
+	mux.HandleFunc("POST /auth/apple", appleHandler.Auth)
 	mux.HandleFunc("POST /token/refresh", sessionHandler.Refresh)
 	mux.Handle("POST /token/revoke", authMiddleware(http.HandlerFunc(sessionHandler.RevokeSingle)))
 	mux.Handle("POST /token/revoke/all", authMiddleware(http.HandlerFunc(sessionHandler.RevokeAll)))
 
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "3000"
+		port = "8080"
 	}
 
 	srv := &http.Server{Addr: ":" + port, Handler: mux}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 )
 
 // helper to build a test manager with sane defaults
@@ -24,7 +25,10 @@ func newTestMgr(t *testing.T, opts ...func(*Config)) *Manager {
 	for _, o := range opts {
 		o(cfg)
 	}
-	mgr := NewManager(cfg)
+	mgr, err := NewManager(cfg)
+	if err != nil {
+		t.Fatalf("New manager: %v", err)
+	}
 	return mgr
 }
 
@@ -32,7 +36,8 @@ func TestIssueAndParseAccess(t *testing.T) {
 	mgr := newTestMgr(t)
 
 	attrs := map[string]string{"email": "user@example.com"}
-	tok, err := mgr.IssueAccess("user-123", attrs)
+	var userID = uuid.MustParse("de2f8213-246d-4f95-8e02-1431b47e0a09")
+	tok, err := mgr.IssueAccess(userID, attrs)
 	if err != nil {
 		t.Fatalf("IssueAccess: %v", err)
 	}
@@ -42,8 +47,8 @@ func TestIssueAndParseAccess(t *testing.T) {
 		t.Fatalf("ParseAccess: %v", err)
 	}
 
-	if claims.UserID != "user-123" {
-		t.Fatalf("got uid %q, want %q", claims.UserID, "user-123")
+	if claims.Subject != userID.String() {
+		t.Fatalf("got uid %q, want %q", claims.Subject, userID)
 	}
 	if claims.TokenType != tokenTypeAccess {
 		t.Fatalf("got token_type %q, want %q", claims.TokenType, tokenTypeAccess)
@@ -67,7 +72,8 @@ func TestIssueAndParseAccess(t *testing.T) {
 func TestIssueAndParseRefresh(t *testing.T) {
 	mgr := newTestMgr(t)
 
-	tok, err := mgr.IssueRefresh("user-123")
+	var userId = uuid.MustParse("b572fbcc-f567-4032-8933-1a15b522ef60")
+	tok, err := mgr.IssueRefresh(userId)
 	if err != nil {
 		t.Fatalf("IssueRefresh: %v", err)
 	}
@@ -76,8 +82,8 @@ func TestIssueAndParseRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseRefresh: %v", err)
 	}
-	if claims.UserID != "user-123" {
-		t.Fatalf("got uid %q, want %q", claims.UserID, "user-123")
+	if claims.Subject != userId.String() {
+		t.Fatalf("got uid %q, want %q", claims.Subject, userId.String())
 	}
 	if claims.TokenType != tokenTypeRefresh {
 		t.Fatalf("got token_type %q, want %q", claims.TokenType, tokenTypeRefresh)
@@ -87,7 +93,8 @@ func TestIssueAndParseRefresh(t *testing.T) {
 func TestInvalidIssuer(t *testing.T) {
 	// Issue with issuer A
 	issuerA := newTestMgr(t, func(c *Config) { c.Issuer = "issuerA" })
-	tok, err := issuerA.IssueAccess("uid1", nil)
+	var userId = uuid.MustParse("c2080dd1-c872-43a9-8848-e9d49dcd85d6")
+	tok, err := issuerA.IssueAccess(userId, nil)
 	if err != nil {
 		t.Fatalf("IssueAccess: %v", err)
 	}
@@ -105,7 +112,8 @@ func TestInvalidIssuer(t *testing.T) {
 func TestInvalidAudience(t *testing.T) {
 	// Issue with audience A
 	audA := newTestMgr(t, func(c *Config) { c.Audience = "audA" })
-	tok, err := audA.IssueAccess("uid1", nil)
+	userId := uuid.MustParse("02fd253f-5a74-475c-8b72-54336cec2392")
+	tok, err := audA.IssueAccess(userId, nil)
 	if err != nil {
 		t.Fatalf("IssueAccess: %v", err)
 	}
@@ -123,7 +131,8 @@ func TestInvalidAudience(t *testing.T) {
 
 func TestInvalidTokenType(t *testing.T) {
 	mgr := newTestMgr(t)
-	access, err := mgr.IssueAccess("uid1", nil)
+	userId := uuid.MustParse("a7f9271c-a0bf-48d9-a6e3-706df362fddd")
+	access, err := mgr.IssueAccess(userId, nil)
 	if err != nil {
 		t.Fatalf("IssueAccess: %v", err)
 	}
@@ -134,21 +143,11 @@ func TestInvalidTokenType(t *testing.T) {
 	}
 }
 
-func TestEmptyTokenAndEmptyUserID(t *testing.T) {
-	mgr := newTestMgr(t)
-
-	if _, err := mgr.ParseAccess(""); err == nil || !strings.Contains(err.Error(), "empty token") {
-		t.Fatalf("expected empty token error, got %v", err)
-	}
-	if _, err := mgr.IssueAccess("", nil); err == nil || !strings.Contains(err.Error(), "empty userID") {
-		t.Fatalf("expected empty userID error, got %v", err)
-	}
-}
-
 func TestRefreshFrom_NoRotate(t *testing.T) {
 	mgr := newTestMgr(t)
 
-	refTok, err := mgr.IssueRefresh("uid-xyz")
+	userId := uuid.MustParse("ea014952-e613-4b38-9a17-1d766eb095c9")
+	refTok, err := mgr.IssueRefresh(userId)
 	if err != nil {
 		t.Fatalf("IssueRefresh: %v", err)
 	}
@@ -166,8 +165,8 @@ func TestRefreshFrom_NoRotate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseAccess: %v", err)
 	}
-	if claims.UserID != "uid-xyz" {
-		t.Fatalf("got uid %q, want %q", claims.UserID, "uid-xyz")
+	if claims.Subject != userId.String() {
+		t.Fatalf("got uid %q, want %q", claims.Subject, userId.String())
 	}
 	if claims.Attrs["k"] != "v" {
 		t.Fatalf("attrs not embedded in new access token")
@@ -177,7 +176,8 @@ func TestRefreshFrom_NoRotate(t *testing.T) {
 func TestRefreshFrom_Rotate(t *testing.T) {
 	mgr := newTestMgr(t)
 
-	origRefresh, err := mgr.IssueRefresh("uid-xyz")
+	userId := uuid.MustParse("9c21b47e-85c1-480b-a588-b42b6f89cd7a")
+	origRefresh, err := mgr.IssueRefresh(userId)
 	if err != nil {
 		t.Fatalf("IssueRefresh: %v", err)
 	}
@@ -206,11 +206,10 @@ func TestExpiredTokenRejected(t *testing.T) {
 	// Build an already-expired ACCESS token
 	now := time.Now().Add(-2 * time.Minute) // pretend token was issued 2m ago
 	claims := Claims{
-		UserID:    "uid-expired",
 		Attrs:     nil,
 		TokenType: tokenTypeAccess,
 		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   "uid-expired",
+			Subject:   uuid.MustParse("f7ca09e0-ab01-4ec3-89da-e038e4712535").String(),
 			IssuedAt:  jwt.NewNumericDate(now),
 			NotBefore: jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(-1 * time.Minute)), // expired 1m ago

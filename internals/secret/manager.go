@@ -13,10 +13,14 @@ type Manager struct {
 	config *Config
 }
 
-func NewManager(cfg *Config) *Manager {
+func NewManager(cfg *Config) (*Manager, error) {
+	if cfg == nil {
+		return nil, errors.New("missing config")
+	}
+
 	return &Manager{
 		config: cfg,
-	}
+	}, nil
 }
 
 func (m *Manager) Encrypt(plaintext string) (string, error) {
