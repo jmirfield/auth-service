@@ -1,0 +1,10 @@
+FROM golang:1.24-alpine AS builder
+RUN apk add --no-cache ca-certificates git
+RUN go install github.com/pressly/goose/v3/cmd/goose@latest
+
+FROM alpine:3.22
+RUN apk add --no-cache ca-certificates
+COPY --from=builder /go/bin/goose /usr/local/bin/goose
+WORKDIR /migrations
+COPY migrations/*.sql .
+ENTRYPOINT ["goose"]

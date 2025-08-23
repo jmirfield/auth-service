@@ -1,0 +1,58 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: always
+    environment:
+      POSTGRES_DB: auth_db
+      POSTGRES_USER: auth_user
+      POSTGRES_PASSWORD: auth_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.migrate
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Goose can read these; then you can just run `goose up`
+      GOOSE_DRIVER: postgres
+      GOOSE_DBSTRING: postgres://auth_user:auth_pass@db:5432/auth_db?sslmode=disable
+    command: ["-dir", "/migrations", "up"]
+    restart: "no"
+
+  server:
+    build: .
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./secrets:/run/keys:ro
+    env_file:
+      - .env
+    environment:
+      PORT: "8080"
+      APPLE_PRIVATE_KEY_PATH: /run/keys/AppleKey.p8
+      DATABASE_URL: postgres://auth_user:auth_pass@db:5432/auth_db?sslmode=disable
+    ports:
+      - "3000:8080"
+
+  adminer:
+    image: adminer
+    restart: always
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+    ports:
+      - "8081:8080"
+
+volumes:
+  pgdata:
