@@ -19,7 +19,7 @@ services:
   migrate:
     build:
       context: .
-      dockerfile: Dockerfile.migrate
+      dockerfile: Dockerfile.migration
     depends_on:
       db:
         condition: service_healthy
