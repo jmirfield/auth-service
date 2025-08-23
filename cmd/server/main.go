@@ -97,7 +97,7 @@ func main() {
 	authMiddleware := authhttp.NewAuth(sessionMgr).Middleware
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /auth/apple", appleHandler.Auth)
+	mux.HandleFunc("POST /token/apple", appleHandler.Auth)
 	mux.HandleFunc("POST /token/refresh", sessionHandler.Refresh)
 	mux.Handle("POST /token/revoke", authMiddleware(http.HandlerFunc(sessionHandler.RevokeSingle)))
 	mux.Handle("POST /token/revoke/all", authMiddleware(http.HandlerFunc(sessionHandler.RevokeAll)))
