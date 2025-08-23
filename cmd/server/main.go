@@ -16,7 +16,6 @@ import (
 	"github.com/jmirfield/auth-service/internals/handlers"
 	authhttp "github.com/jmirfield/auth-service/internals/http"
 	"github.com/jmirfield/auth-service/internals/repository/postgres"
-	"github.com/jmirfield/auth-service/internals/secret"
 	"github.com/jmirfield/auth-service/internals/session"
 )
 
@@ -74,11 +73,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	secretCfg, err := secret.Load()
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	sessionMgr, err := session.NewManager(sessionCfg)
 	if err != nil {
 		log.Fatal(err)
@@ -90,17 +84,12 @@ func main() {
 		log.Fatal(err)
 	}
 
-	secretMgr, err := secret.NewManager(secretCfg)
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	sessionHandler, err := handlers.NewSessionHandler(sessionMgr, usrstore)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	appleHandler, err := handlers.NewAppleHandler(appleCfg, usrstore, sessionMgr, appleMgr, secretMgr)
+	appleHandler, err := handlers.NewAppleHandler(appleCfg, usrstore, sessionMgr, appleMgr)
 	if err != nil {
 		log.Fatal(err)
 	}

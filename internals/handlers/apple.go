@@ -19,10 +19,9 @@ type AppleHandler struct {
 	repo repository.UserReadWriter
 	sm   *session.Manager
 	am   *apple.Manager
-	scm  *secret.Manager
 }
 
-func NewAppleHandler(cfg *apple.Config, ur repository.UserReadWriter, mgr *session.Manager, am *apple.Manager, scm *secret.Manager) (*AppleHandler, error) {
+func NewAppleHandler(cfg *apple.Config, ur repository.UserReadWriter, mgr *session.Manager, am *apple.Manager) (*AppleHandler, error) {
 	if cfg == nil {
 		return nil, errors.New("missing config")
 	}
@@ -39,11 +38,7 @@ func NewAppleHandler(cfg *apple.Config, ur repository.UserReadWriter, mgr *sessi
 		return nil, errors.New("missing apple manager")
 	}
 
-	if scm == nil {
-		return nil, errors.New("missing secret manager")
-	}
-
-	return &AppleHandler{cfg: cfg, repo: ur, sm: mgr, am: am, scm: scm}, nil
+	return &AppleHandler{cfg: cfg, repo: ur, sm: mgr, am: am}, nil
 }
 
 type appleAuthReq struct {
