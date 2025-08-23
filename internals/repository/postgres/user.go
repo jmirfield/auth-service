@@ -20,15 +20,12 @@ func NewUserRepo(pool *pgxpool.Pool) repository.UserReadWriter {
 	return &UserRepo{pool: pool}
 }
 
-// ---- Users ----
-
 func (r *UserRepo) UpsertUser(ctx context.Context, u *user.User) error {
 	const q = `
 INSERT INTO users (id, attributes)
 VALUES ($1, COALESCE($2, '{}'::jsonb))
 ON CONFLICT (id)
 DO UPDATE SET attributes = EXCLUDED.attributes`
-	// pgx will marshal map[string]any to jsonb if registered; otherwise use json.Marshal.
 	_, err := r.pool.Exec(ctx, q, u.ID, u.Attr)
 	return err
 }
@@ -48,10 +45,7 @@ func (r *UserRepo) GetUser(ctx context.Context, id uuid.UUID) (*user.User, error
 	return &out, nil
 }
 
-// ---- Identities ----
-
 func (r *UserRepo) UpsertIdentity(ctx context.Context, ident *user.Identity) error {
-	// Enforces UNIQUE (provider, sub); will (re)point to new user_id if already present.
 	const q = `
 INSERT INTO user_identities (provider, sub, user_id)
 VALUES ($1, $2, $3)
@@ -93,8 +87,6 @@ func (r *UserRepo) DeleteIdentity(ctx context.Context, provider, sub string) err
 	return err
 }
 
-// ---- Refresh tokens ----
-
 func (r *UserRepo) InsertRefreshToken(ctx context.Context, t *user.RefreshToken) error {
 	const q = `
 INSERT INTO user_refresh_tokens (user_id, jti, hash, expires_at)
@@ -104,9 +96,8 @@ ON CONFLICT (user_id, jti) DO NOTHING`
 	if err != nil {
 		return err
 	}
-	// Optional: treat "already exists" as success
+
 	if cmd.RowsAffected() == 0 {
-		// nothing inserted; up to you whether this is an error
 	}
 	return nil
 }

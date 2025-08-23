@@ -27,7 +27,6 @@ func TestSetGet_NoTTL(t *testing.T) {
 		t.Fatalf("Get = %v, want %v", got, 42)
 	}
 
-	// Ensure it still exists on repeated Get.
 	got2, err := c.Get(ctx, "a")
 	if err != nil {
 		t.Fatalf("Get (second): %v", err)

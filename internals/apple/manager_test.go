@@ -59,12 +59,10 @@ func mustECDSAKey(tb testing.TB) *ecdsa.PrivateKey {
 	return k
 }
 
-// base64url without padding
 func b64u(b []byte) string {
 	return strings.TrimRight(base64.URLEncoding.EncodeToString(b), "=")
 }
 
-// craft a JWKS JSON for a given RSA public key (single key with kid)
 func jwksJSON(kid string, pub *rsa.PublicKey) []byte {
 	n := b64u(pub.N.Bytes())
 	e := b64u(bigIntToBytes(pub.E))
@@ -83,7 +81,6 @@ func jwksJSON(kid string, pub *rsa.PublicKey) []byte {
 }
 
 func bigIntToBytes(e int) []byte {
-	// small helper for RSA exponent (usually 65537)
 	if e == 0 {
 		return []byte{0}
 	}
@@ -123,7 +120,6 @@ func TestNewManager_Args(t *testing.T) {
 }
 
 func TestVerifyIDToken_Success(t *testing.T) {
-	// Setup keys and manager
 	rsaPriv := mustRSAKey(t)
 	rsaPub := rsaPriv.Public().(*rsa.PublicKey)
 	kid := "kid-1"
@@ -220,7 +216,6 @@ func TestVerifyIDToken_ErrorPaths(t *testing.T) {
 
 	t.Run("missing kid", func(t *testing.T) {
 		tok := jwt.NewWithClaims(jwt.SigningMethodRS256, makeClaims(nil))
-		// no header kid
 		s, _ := tok.SignedString(rsaPriv)
 		if _, err := m.VerifyIDToken(s); err == nil {
 			t.Fatal("expected error due to missing kid")
@@ -264,7 +259,6 @@ func TestVerifyIDToken_ErrorPaths(t *testing.T) {
 }
 
 func TestVerifyIDToken_KeyCacheMissTriggersJWKSRefresh(t *testing.T) {
-	// RSA used to sign id_token
 	rsaPriv := mustRSAKey(t)
 	rsaPub := rsaPriv.Public().(*rsa.PublicKey)
 	kid := "kid-jwks"
@@ -309,7 +303,7 @@ func TestExchangeCode_Success(t *testing.T) {
 		TeamID:     "T123",
 		ClientID:   "com.example",
 		KeyID:      "KID123",
-		PrivateKey: ecdsaPriv, // ES256
+		PrivateKey: ecdsaPriv,
 	}
 	var captured url.Values
 
@@ -356,7 +350,6 @@ func TestExchangeCode_Success(t *testing.T) {
 		t.Fatalf("unexpected token response: %+v", resp)
 	}
 
-	// Check form fields
 	if captured.Get("client_id") != cfg.ClientID ||
 		captured.Get("grant_type") != "authorization_code" ||
 		captured.Get("code") != "the-code" ||

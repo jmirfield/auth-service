@@ -62,14 +62,12 @@ func TestEqual_DifferentValues(t *testing.T) {
 }
 
 func TestEqual_DifferentLengths(t *testing.T) {
-	// Not real hashes, but different lengths should short-circuit to false.
 	if Equal("short", "a little bit longer") {
 		t.Fatalf("Equal should return false for different lengths")
 	}
 }
 
 func TestEqual_SameContentDifferentInstances(t *testing.T) {
-	// Ensure true for equal strings created separately.
 	h1 := Hash("repeatable")
 	h2 := Hash("repeatable")
 	if !Equal(h1, h2) {

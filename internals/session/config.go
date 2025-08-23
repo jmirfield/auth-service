@@ -15,7 +15,6 @@ type Config struct {
 	ClockSkewLeeway time.Duration
 }
 
-// Validate checks that required fields are present.
 func (c *Config) Validate() error {
 	if c.Secret == "" {
 		return errors.New("missing required session secret env var")

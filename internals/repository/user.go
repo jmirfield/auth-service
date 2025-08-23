@@ -22,12 +22,8 @@ type UserReader interface {
 }
 
 type UserWriter interface {
-	// ---- Users ----
-
 	// UpsertUser creates or updates a user row (attributes, etc).
 	UpsertUser(ctx context.Context, u *user.User) error
-
-	// ---- Identities (provider + sub) ----
 
 	// UpsertIdentity ensures (provider, sub) -> user_id mapping exists (or is reassigned).
 	// Enforces your UNIQUE (provider, sub) invariant.
@@ -35,8 +31,6 @@ type UserWriter interface {
 
 	// DeleteIdentity removes a single (provider, sub) mapping.
 	DeleteIdentity(ctx context.Context, provider, sub string) error
-
-	// ---- Refresh tokens ----
 
 	// InsertRefreshToken persists a new refresh token record (hashed).
 	InsertRefreshToken(ctx context.Context, t *user.RefreshToken) error
