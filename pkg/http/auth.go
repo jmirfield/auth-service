@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/jmirfield/auth-service/internals/session"
+	"github.com/jmirfield/auth-service/pkg/session"
 )
 
 type ctxKey string

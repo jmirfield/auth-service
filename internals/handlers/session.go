@@ -6,10 +6,10 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
-	httpx "github.com/jmirfield/auth-service/internals/http"
+	httpx "github.com/jmirfield/auth-service/pkg/http"
 	"github.com/jmirfield/auth-service/internals/repository"
 	"github.com/jmirfield/auth-service/internals/secret"
-	"github.com/jmirfield/auth-service/internals/session"
+	"github.com/jmirfield/auth-service/pkg/session"
 )
 
 type SessionHandler struct {

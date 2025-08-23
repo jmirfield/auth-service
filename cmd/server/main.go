@@ -14,9 +14,9 @@ import (
 	"github.com/jmirfield/auth-service/internals/apple"
 	"github.com/jmirfield/auth-service/internals/cache"
 	"github.com/jmirfield/auth-service/internals/handlers"
-	authhttp "github.com/jmirfield/auth-service/internals/http"
+	authhttp "github.com/jmirfield/auth-service/pkg/http"
 	"github.com/jmirfield/auth-service/internals/repository/postgres"
-	"github.com/jmirfield/auth-service/internals/session"
+	"github.com/jmirfield/auth-service/pkg/session"
 )
 
 func main() {

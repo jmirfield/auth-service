@@ -17,7 +17,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jmirfield/auth-service/internals/cache"
-	httpx "github.com/jmirfield/auth-service/internals/http"
+	httpx "github.com/jmirfield/auth-service/pkg/http"
 	jwkx "github.com/jmirfield/auth-service/internals/jwk"
 )
 

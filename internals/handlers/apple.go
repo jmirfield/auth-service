@@ -8,10 +8,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmirfield/auth-service/internals/apple"
 	"github.com/jmirfield/auth-service/internals/domain/user"
-	httpx "github.com/jmirfield/auth-service/internals/http"
+	httpx "github.com/jmirfield/auth-service/pkg/http"
 	"github.com/jmirfield/auth-service/internals/repository"
 	"github.com/jmirfield/auth-service/internals/secret"
-	"github.com/jmirfield/auth-service/internals/session"
+	"github.com/jmirfield/auth-service/pkg/session"
 )
 
 type AppleHandler struct {
