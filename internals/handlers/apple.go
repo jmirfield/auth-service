@@ -95,7 +95,12 @@ func (h *AppleHandler) Auth(w http.ResponseWriter, r *http.Request) {
 			Provider: claims.Issuer,
 			Sub:      claims.Subject,
 		}
-		h.repo.UpsertIdentity(ctx, ident)
+
+		err = h.repo.UpsertIdentity(ctx, ident)
+		if err != nil {
+			httpx.InternalServerError(w)
+			return
+		}
 	}
 
 	appAccess, appRefresh, err := h.sm.IssuePair(ident.Uid, nil)

@@ -107,7 +107,7 @@ func main() {
 		port = "8080"
 	}
 
-	srv := &http.Server{Addr: ":" + port, Handler: mux}
+	srv := &http.Server{Addr: ":" + port, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		log.Println("Listening on :" + port)
 		log.Fatal(srv.ListenAndServe())

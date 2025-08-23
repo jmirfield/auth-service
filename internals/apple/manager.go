@@ -258,7 +258,10 @@ func (m *Manager) refreshJWKS(ctx context.Context) error {
 	}
 
 	for kid, key := range keys {
-		m.cache.Set(ctx, kid, key, m.cfg.JwkCacheTTL)
+		err = m.cache.Set(ctx, kid, key, m.cfg.JwkCacheTTL)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
