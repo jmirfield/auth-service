@@ -107,3 +107,5 @@ Add auth support for:
 - Others?
 
 Add logging****
+
+Add saving username
