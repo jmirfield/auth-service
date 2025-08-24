@@ -48,7 +48,13 @@ func (a *Auth) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		ctx = context.WithValue(ctx, userIDCtxKey, claims.Subject)
+		sub, err := uuid.Parse(claims.Subject)
+		if err != nil || sub == uuid.Nil {
+			Error(w, http.StatusUnauthorized, "invalid subject")
+			return
+		}
+
+		ctx = context.WithValue(ctx, userIDCtxKey, sub)
 		ctx = context.WithValue(ctx, sessionClaimsCtxKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -56,7 +62,10 @@ func (a *Auth) Middleware(next http.Handler) http.Handler {
 
 func UserIDFromContext(ctx context.Context) (uuid.UUID, bool) {
 	uid, ok := ctx.Value(userIDCtxKey).(uuid.UUID)
-	return uid, ok && uid.String() != ""
+	if !ok || uid == uuid.Nil {
+		return uuid.Nil, false
+	}
+	return uid, true
 }
 
 func ClaimsFromContext(ctx context.Context) (*session.Claims, bool) {
