@@ -2,7 +2,6 @@ package apple
 
 import (
 	"bytes"
-	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -104,7 +103,7 @@ func signRS256(tb testing.TB, kid string, priv *rsa.PrivateKey, claims *Claims) 
 
 func TestNewManager_Args(t *testing.T) {
 	cfg := &Config{}
-	c := cache.NewMemory[rsa.PublicKey](context.Background())
+	c := cache.NewMemory[rsa.PublicKey](t.Context())
 	h := &fakeHTTP{}
 
 	if _, err := NewManager(nil, c, h); err == nil {
@@ -129,8 +128,8 @@ func TestVerifyIDToken_Success(t *testing.T) {
 		ClientID:    clientID,
 		JwkCacheTTL: time.Hour,
 	}
-	c := cache.NewMemory[rsa.PublicKey](context.Background())
-	_ = c.Set(context.Background(), kid, *rsaPub, time.Hour)
+	c := cache.NewMemory[rsa.PublicKey](t.Context())
+	_ = c.Set(t.Context(), kid, *rsaPub, time.Hour)
 
 	m, _ := NewManager(cfg, c, &fakeHTTP{})
 
@@ -146,7 +145,7 @@ func TestVerifyIDToken_Success(t *testing.T) {
 
 	idToken := signRS256(t, kid, rsaPriv, claims)
 
-	got, err := m.VerifyIDToken(idToken)
+	got, err := m.VerifyIDToken(t.Context(), idToken)
 	if err != nil {
 		t.Fatalf("VerifyIDToken: %v", err)
 	}
@@ -162,8 +161,8 @@ func TestVerifyIDToken_Nonce_Plain_And_SHA256(t *testing.T) {
 	clientID := "app.id"
 
 	cfg := &Config{ClientID: clientID}
-	c := cache.NewMemory[rsa.PublicKey](context.Background())
-	_ = c.Set(context.Background(), kid, *rsaPub, time.Hour)
+	c := cache.NewMemory[rsa.PublicKey](t.Context())
+	_ = c.Set(t.Context(), kid, *rsaPub, time.Hour)
 	m, _ := NewManager(cfg, c, &fakeHTTP{})
 
 	nonce := "abc123"
@@ -178,7 +177,7 @@ func TestVerifyIDToken_Nonce_Plain_And_SHA256(t *testing.T) {
 			},
 		}
 		idToken := signRS256(t, kid, rsaPriv, claims)
-		if _, err := m.VerifyIDToken(idToken, nonce); err != nil {
+		if _, err := m.VerifyIDToken(t.Context(), idToken, nonce); err != nil {
 			t.Fatalf("case %d: VerifyIDToken with nonce failed: %v", i, err)
 		}
 	}
@@ -190,8 +189,8 @@ func TestVerifyIDToken_ErrorPaths(t *testing.T) {
 	kid := "kid-3"
 	clientID := "cid"
 	cfg := &Config{ClientID: clientID}
-	c := cache.NewMemory[rsa.PublicKey](context.Background())
-	_ = c.Set(context.Background(), kid, *rsaPub, time.Hour)
+	c := cache.NewMemory[rsa.PublicKey](t.Context())
+	_ = c.Set(t.Context(), kid, *rsaPub, time.Hour)
 	m, _ := NewManager(cfg, c, &fakeHTTP{})
 
 	makeClaims := func(mod func(*Claims)) *Claims {
@@ -209,7 +208,7 @@ func TestVerifyIDToken_ErrorPaths(t *testing.T) {
 	}
 
 	t.Run("empty token", func(t *testing.T) {
-		if _, err := m.VerifyIDToken(""); err == nil {
+		if _, err := m.VerifyIDToken(t.Context(), ""); err == nil {
 			t.Fatal("expected error")
 		}
 	})
@@ -217,42 +216,42 @@ func TestVerifyIDToken_ErrorPaths(t *testing.T) {
 	t.Run("missing kid", func(t *testing.T) {
 		tok := jwt.NewWithClaims(jwt.SigningMethodRS256, makeClaims(nil))
 		s, _ := tok.SignedString(rsaPriv)
-		if _, err := m.VerifyIDToken(s); err == nil {
+		if _, err := m.VerifyIDToken(t.Context(), s); err == nil {
 			t.Fatal("expected error due to missing kid")
 		}
 	})
 
 	t.Run("invalid issuer", func(t *testing.T) {
 		id := signRS256(t, kid, rsaPriv, makeClaims(func(c *Claims) { c.Issuer = "x" }))
-		if _, err := m.VerifyIDToken(id); err == nil || !strings.Contains(err.Error(), "invalid issuer") {
+		if _, err := m.VerifyIDToken(t.Context(), id); err == nil || !strings.Contains(err.Error(), "invalid issuer") {
 			t.Fatalf("want invalid issuer error, got %v", err)
 		}
 	})
 
 	t.Run("invalid audience", func(t *testing.T) {
 		id := signRS256(t, kid, rsaPriv, makeClaims(func(c *Claims) { c.Audience = jwt.ClaimStrings{"other"} }))
-		if _, err := m.VerifyIDToken(id); err == nil || !strings.Contains(err.Error(), "invalid audience") {
+		if _, err := m.VerifyIDToken(t.Context(), id); err == nil || !strings.Contains(err.Error(), "invalid audience") {
 			t.Fatalf("want invalid audience error, got %v", err)
 		}
 	})
 
 	t.Run("missing sub", func(t *testing.T) {
 		id := signRS256(t, kid, rsaPriv, makeClaims(func(c *Claims) { c.Subject = "" }))
-		if _, err := m.VerifyIDToken(id); err == nil || !strings.Contains(err.Error(), "missing sub") {
+		if _, err := m.VerifyIDToken(t.Context(), id); err == nil || !strings.Contains(err.Error(), "missing sub") {
 			t.Fatalf("want missing sub error, got %v", err)
 		}
 	})
 
 	t.Run("nonce required but missing", func(t *testing.T) {
 		id := signRS256(t, kid, rsaPriv, makeClaims(nil))
-		if _, err := m.VerifyIDToken(id, "need-nonce"); err == nil || !strings.Contains(err.Error(), "nonce required") {
+		if _, err := m.VerifyIDToken(t.Context(), id, "need-nonce"); err == nil || !strings.Contains(err.Error(), "nonce required") {
 			t.Fatalf("want nonce required error, got %v", err)
 		}
 	})
 
 	t.Run("nonce mismatch", func(t *testing.T) {
 		id := signRS256(t, kid, rsaPriv, makeClaims(func(c *Claims) { c.Nonce = "foo" }))
-		if _, err := m.VerifyIDToken(id, "bar"); err == nil || !strings.Contains(err.Error(), "nonce mismatch") {
+		if _, err := m.VerifyIDToken(t.Context(), id, "bar"); err == nil || !strings.Contains(err.Error(), "nonce mismatch") {
 			t.Fatalf("want nonce mismatch error, got %v", err)
 		}
 	})
@@ -266,7 +265,7 @@ func TestVerifyIDToken_KeyCacheMissTriggersJWKSRefresh(t *testing.T) {
 
 	cfg := &Config{ClientID: clientID, JwkCacheTTL: time.Minute}
 
-	c := cache.NewMemory[rsa.PublicKey](context.Background())
+	c := cache.NewMemory[rsa.PublicKey](t.Context())
 	httpCli := &fakeHTTP{
 		DoFunc: func(req *http.Request) (*http.Response, error) {
 			if req.Method != http.MethodGet || !strings.Contains(req.URL.String(), "/auth/keys") {
@@ -292,7 +291,7 @@ func TestVerifyIDToken_KeyCacheMissTriggersJWKSRefresh(t *testing.T) {
 	}
 	id := signRS256(t, kid, rsaPriv, claims)
 
-	if _, err := m.VerifyIDToken(id); err != nil {
+	if _, err := m.VerifyIDToken(t.Context(), id); err != nil {
 		t.Fatalf("VerifyIDToken after JWKS refresh failed: %v", err)
 	}
 }
@@ -340,9 +339,9 @@ func TestExchangeCode_Success(t *testing.T) {
 		},
 	}
 
-	m, _ := NewManager(cfg, cache.NewMemory[rsa.PublicKey](context.Background()), httpCli)
+	m, _ := NewManager(cfg, cache.NewMemory[rsa.PublicKey](t.Context()), httpCli)
 
-	resp, err := m.ExchangeCode("the-code")
+	resp, err := m.ExchangeCode(t.Context(), "the-code")
 	if err != nil {
 		t.Fatalf("ExchangeCode: %v", err)
 	}
@@ -375,8 +374,8 @@ func TestExchangeCode_HTTPErrorBubbles(t *testing.T) {
 		},
 	}
 
-	m, _ := NewManager(cfg, cache.NewMemory[rsa.PublicKey](context.Background()), httpCli)
-	_, err := m.ExchangeCode("x")
+	m, _ := NewManager(cfg, cache.NewMemory[rsa.PublicKey](t.Context()), httpCli)
+	_, err := m.ExchangeCode(t.Context(), "x")
 	if err == nil || !strings.Contains(err.Error(), "nope") {
 		t.Fatalf("want propagated error body, got %v", err)
 	}
@@ -399,15 +398,15 @@ func TestRefresh_Success_And_MissingToken(t *testing.T) {
 			}, nil
 		},
 	}
-	m, _ := NewManager(cfg, cache.NewMemory[rsa.PublicKey](context.Background()), httpCli)
+	m, _ := NewManager(cfg, cache.NewMemory[rsa.PublicKey](t.Context()), httpCli)
 
 	// Missing token
-	if _, err := m.Refresh(""); err == nil {
+	if _, err := m.Refresh(t.Context(), ""); err == nil {
 		t.Fatal("expected error for missing refresh token")
 	}
 
 	// Success path
-	resp, err := m.Refresh("rt")
+	resp, err := m.Refresh(t.Context(), "rt")
 	if err != nil {
 		t.Fatalf("Refresh error: %v", err)
 	}

@@ -50,11 +50,11 @@ func (c *Config) Validate() error {
 
 func Load() (*Config, error) {
 	team := os.Getenv("APPLE_TEAM_ID")
-	client := os.Getenv("APPLE_CLIENT_ID")
+	cli := os.Getenv("APPLE_CLIENT_ID")
 	kid := os.Getenv("APPLE_KEY_ID")
-	keyPath := os.Getenv("APPLE_PRIVATE_KEY_PATH")
+	path := os.Getenv("APPLE_PRIVATE_KEY_PATH")
 
-	pemBytes, err := os.ReadFile(filepath.Clean(keyPath))
+	pemBytes, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +76,7 @@ func Load() (*Config, error) {
 
 	cfg := &Config{
 		TeamID:        team,
-		ClientID:      client,
+		ClientID:      cli,
 		KeyID:         kid,
 		PrivateKey:    ecdsaKey,
 		PrivateKeyPEM: pemBytes,

@@ -9,7 +9,7 @@ type Identity struct {
 }
 
 const (
-	ProviderApple  = "apple"
-	ProviderGoogle = "google"
+	ProviderApple  = "https://appleid.apple.com"
+	ProviderGoogle = "https://accounts.google.com"
 	// add more as needed
 )

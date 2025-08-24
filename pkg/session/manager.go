@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"time"
@@ -29,7 +30,7 @@ type Manager struct {
 	clockSkewLeeway time.Duration
 }
 
-func NewManager(cfg *Config) (*Manager, error) {
+func NewManager(cfg *Config) (SessionManager, error) {
 	if cfg == nil {
 		return nil, errors.New("missing config")
 	}
@@ -43,21 +44,21 @@ func NewManager(cfg *Config) (*Manager, error) {
 	}, nil
 }
 
-func (m *Manager) IssueAccess(userID uuid.UUID, attrs map[string]string) (string, error) {
+func (m *Manager) IssueAccess(_ context.Context, userID uuid.UUID, attrs map[string]string) (string, error) {
 	return m.issue(userID, attrs, tokenTypeAccess, m.accessTTL)
 }
 
-func (m *Manager) IssueRefresh(userID uuid.UUID) (string, error) {
+func (m *Manager) IssueRefresh(_ context.Context, userID uuid.UUID) (string, error) {
 	return m.issue(userID, nil, tokenTypeRefresh, m.refreshTTL)
 }
 
-func (m *Manager) IssuePair(userID uuid.UUID, attrs map[string]string) (access string, refresh string, err error) {
-	access, err = m.IssueAccess(userID, attrs)
+func (m *Manager) IssuePair(ctx context.Context, userID uuid.UUID, attrs map[string]string) (access string, refresh string, err error) {
+	access, err = m.IssueAccess(ctx, userID, attrs)
 	if err != nil {
 		return "", "", err
 	}
 
-	refresh, err = m.IssueRefresh(userID)
+	refresh, err = m.IssueRefresh(ctx, userID)
 	if err != nil {
 		return "", "", err
 	}
@@ -91,27 +92,27 @@ func (m *Manager) issue(userID uuid.UUID, attrs map[string]string, typ string, t
 	return token.SignedString(m.secret)
 }
 
-func (m *Manager) ParseAccess(tokenString string) (*Claims, error) {
+func (m *Manager) ParseAccess(_ context.Context, tokenString string) (*Claims, error) {
 	return m.parseTyped(tokenString, tokenTypeAccess)
 }
 
-func (m *Manager) ParseRefresh(tokenString string) (*Claims, error) {
+func (m *Manager) ParseRefresh(_ context.Context, tokenString string) (*Claims, error) {
 	return m.parseTyped(tokenString, tokenTypeRefresh)
 }
 
-func (m *Manager) RefreshFrom(refreshToken string, attrs map[string]string, rotate bool) (newAccess, newRefresh string, err error) {
-	refreshClaims, err := m.ParseRefresh(refreshToken)
+func (m *Manager) RefreshFrom(ctx context.Context, old string, attrs map[string]string, rotate bool) (newAccess, newRefresh string, err error) {
+	refreshClaims, err := m.ParseRefresh(ctx, old)
 	if err != nil {
 		return "", "", err
 	}
 
-	newAccess, err = m.IssueAccess(uuid.MustParse(refreshClaims.Subject), attrs)
+	newAccess, err = m.IssueAccess(ctx, uuid.MustParse(refreshClaims.Subject), attrs)
 	if err != nil {
 		return "", "", err
 	}
 
 	if rotate {
-		newRefresh, err = m.IssueRefresh(uuid.MustParse(refreshClaims.Subject))
+		newRefresh, err = m.IssueRefresh(ctx, uuid.MustParse(refreshClaims.Subject))
 		if err != nil {
 			return "", "", err
 		}
@@ -120,8 +121,8 @@ func (m *Manager) RefreshFrom(refreshToken string, attrs map[string]string, rota
 	return newAccess, newRefresh, nil
 }
 
-func (m *Manager) parseTyped(tokenString, wantType string) (*Claims, error) {
-	if tokenString == "" {
+func (m *Manager) parseTyped(tokStr, wantType string) (*Claims, error) {
+	if tokStr == "" {
 		return nil, errors.New("empty token")
 	}
 
@@ -131,7 +132,7 @@ func (m *Manager) parseTyped(tokenString, wantType string) (*Claims, error) {
 	)
 
 	claims := &Claims{}
-	_, err := parser.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {
+	_, err := parser.ParseWithClaims(tokStr, claims, func(t *jwt.Token) (any, error) {
 		return m.secret, nil
 	})
 

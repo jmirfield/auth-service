@@ -17,8 +17,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jmirfield/auth-service/internals/cache"
-	httpx "github.com/jmirfield/auth-service/pkg/http"
 	jwkx "github.com/jmirfield/auth-service/internals/jwk"
+	httpx "github.com/jmirfield/auth-service/pkg/http"
 )
 
 type Manager struct {
@@ -45,7 +45,7 @@ type jwks struct {
 	Keys []jwk `json:"keys"`
 }
 
-func NewManager(cfg *Config, provider cache.Provider[rsa.PublicKey], client httpx.HttpClient) (*Manager, error) {
+func NewManager(cfg *Config, provider cache.Provider[rsa.PublicKey], client httpx.HttpClient) (AppleManager, error) {
 	if cfg == nil {
 		return nil, errors.New("missing config")
 	}
@@ -54,17 +54,15 @@ func NewManager(cfg *Config, provider cache.Provider[rsa.PublicKey], client http
 		return nil, errors.New("missing cache provider")
 	}
 
-	var manager = &Manager{
+	return &Manager{
 		cfg:    cfg,
 		cache:  provider,
 		client: client,
-	}
-
-	return manager, nil
+	}, nil
 }
 
-func (m *Manager) VerifyIDToken(idToken string, nonce ...string) (*Claims, error) {
-	if idToken == "" {
+func (m *Manager) VerifyIDToken(ctx context.Context, tok string, nonce ...string) (*Claims, error) {
+	if tok == "" {
 		return nil, errors.New("empty id_token")
 	}
 
@@ -73,11 +71,11 @@ func (m *Manager) VerifyIDToken(idToken string, nonce ...string) (*Claims, error
 		jwt.WithLeeway(60*time.Second),
 	)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	claims := &Claims{}
-	_, err := parser.ParseWithClaims(idToken, claims, func(t *jwt.Token) (any, error) {
+	_, err := parser.ParseWithClaims(tok, claims, func(t *jwt.Token) (any, error) {
 		kid, _ := t.Header["kid"].(string)
 		if kid == "" {
 			return nil, errors.New("missing kid in header")
@@ -130,7 +128,7 @@ type TokenResponse struct {
 	ExpiresIn    int    `json:"expires_in"`
 }
 
-func (m *Manager) ExchangeCode(code string) (*TokenResponse, error) {
+func (m *Manager) ExchangeCode(_ context.Context, code string) (*TokenResponse, error) {
 	secret, err := m.generateClientSecret()
 	if err != nil {
 		return nil, err
@@ -145,8 +143,8 @@ func (m *Manager) ExchangeCode(code string) (*TokenResponse, error) {
 	return m.postToken(data)
 }
 
-func (m *Manager) Refresh(refreshToken string) (*TokenResponse, error) {
-	if refreshToken == "" {
+func (m *Manager) Refresh(_ context.Context, tok string) (*TokenResponse, error) {
+	if tok == "" {
 		return nil, errors.New("missing refresh token")
 	}
 
@@ -158,7 +156,7 @@ func (m *Manager) Refresh(refreshToken string) (*TokenResponse, error) {
 	data := url.Values{}
 	data.Set("client_id", m.cfg.ClientID)
 	data.Set("client_secret", secret)
-	data.Set("refresh_token", refreshToken)
+	data.Set("refresh_token", tok)
 	data.Set("grant_type", "refresh_token")
 
 	return m.postToken(data)

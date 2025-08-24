@@ -12,7 +12,7 @@ import (
 )
 
 // helper to build a test manager with sane defaults
-func newTestMgr(t *testing.T, opts ...func(*Config)) *Manager {
+func newTestMgr(t *testing.T, opts ...func(*Config)) SessionManager {
 	t.Helper()
 	cfg := &Config{
 		Secret:          "test-secret-32-bytes-minimum-please",
@@ -37,12 +37,12 @@ func TestIssueAndParseAccess(t *testing.T) {
 
 	attrs := map[string]string{"email": "user@example.com"}
 	var userID = uuid.MustParse("de2f8213-246d-4f95-8e02-1431b47e0a09")
-	tok, err := mgr.IssueAccess(userID, attrs)
+	tok, err := mgr.IssueAccess(t.Context(), userID, attrs)
 	if err != nil {
 		t.Fatalf("IssueAccess: %v", err)
 	}
 
-	claims, err := mgr.ParseAccess(tok)
+	claims, err := mgr.ParseAccess(t.Context(), tok)
 	if err != nil {
 		t.Fatalf("ParseAccess: %v", err)
 	}
@@ -73,12 +73,12 @@ func TestIssueAndParseRefresh(t *testing.T) {
 	mgr := newTestMgr(t)
 
 	var userId = uuid.MustParse("b572fbcc-f567-4032-8933-1a15b522ef60")
-	tok, err := mgr.IssueRefresh(userId)
+	tok, err := mgr.IssueRefresh(t.Context(), userId)
 	if err != nil {
 		t.Fatalf("IssueRefresh: %v", err)
 	}
 
-	claims, err := mgr.ParseRefresh(tok)
+	claims, err := mgr.ParseRefresh(t.Context(), tok)
 	if err != nil {
 		t.Fatalf("ParseRefresh: %v", err)
 	}
@@ -94,16 +94,16 @@ func TestInvalidIssuer(t *testing.T) {
 	// Issue with issuer A
 	issuerA := newTestMgr(t, func(c *Config) { c.Issuer = "issuerA" })
 	var userId = uuid.MustParse("c2080dd1-c872-43a9-8848-e9d49dcd85d6")
-	tok, err := issuerA.IssueAccess(userId, nil)
+	tok, err := issuerA.IssueAccess(t.Context(), userId, nil)
 	if err != nil {
 		t.Fatalf("IssueAccess: %v", err)
 	}
 	// Parse with issuer B (same secret & aud) -> should fail issuer check
 	issuerB := newTestMgr(t, func(c *Config) {
 		c.Issuer = "issuerB"
-		c.Secret = string(issuerA.secret) // keep same secret to pass signature
+		c.Secret = "test-secret-32-bytes-minimum-please" // keep same secret to pass signature
 	})
-	_, err = issuerB.ParseAccess(tok)
+	_, err = issuerB.ParseAccess(t.Context(), tok)
 	if err == nil || !strings.Contains(err.Error(), "invalid issuer") {
 		t.Fatalf("expected invalid issuer error, got %v", err)
 	}
@@ -113,17 +113,17 @@ func TestInvalidAudience(t *testing.T) {
 	// Issue with audience A
 	audA := newTestMgr(t, func(c *Config) { c.Audience = "audA" })
 	userId := uuid.MustParse("02fd253f-5a74-475c-8b72-54336cec2392")
-	tok, err := audA.IssueAccess(userId, nil)
+	tok, err := audA.IssueAccess(t.Context(), userId, nil)
 	if err != nil {
 		t.Fatalf("IssueAccess: %v", err)
 	}
 	// Parse with audience B (same secret & issuer) -> should fail audience check
 	audB := newTestMgr(t, func(c *Config) {
 		c.Audience = "audB"
-		c.Secret = string(audA.secret)
-		c.Issuer = audA.issuer
+		c.Secret = "test-secret-32-bytes-minimum-please"
+		c.Issuer = "issuer.test"
 	})
-	_, err = audB.ParseAccess(tok)
+	_, err = audB.ParseAccess(t.Context(), tok)
 	if err == nil || !strings.Contains(err.Error(), "invalid audience") {
 		t.Fatalf("expected invalid audience error, got %v", err)
 	}
@@ -132,12 +132,12 @@ func TestInvalidAudience(t *testing.T) {
 func TestInvalidTokenType(t *testing.T) {
 	mgr := newTestMgr(t)
 	userId := uuid.MustParse("a7f9271c-a0bf-48d9-a6e3-706df362fddd")
-	access, err := mgr.IssueAccess(userId, nil)
+	access, err := mgr.IssueAccess(t.Context(), userId, nil)
 	if err != nil {
 		t.Fatalf("IssueAccess: %v", err)
 	}
 	// Parsing ACCESS with ParseRefresh should fail
-	_, err = mgr.ParseRefresh(access)
+	_, err = mgr.ParseRefresh(t.Context(), access)
 	if err == nil || !strings.Contains(err.Error(), "invalid token type") {
 		t.Fatalf("expected invalid token type, got %v", err)
 	}
@@ -147,11 +147,11 @@ func TestRefreshFrom_NoRotate(t *testing.T) {
 	mgr := newTestMgr(t)
 
 	userId := uuid.MustParse("ea014952-e613-4b38-9a17-1d766eb095c9")
-	refTok, err := mgr.IssueRefresh(userId)
+	refTok, err := mgr.IssueRefresh(t.Context(), userId)
 	if err != nil {
 		t.Fatalf("IssueRefresh: %v", err)
 	}
-	newAccess, newRefresh, err := mgr.RefreshFrom(refTok, map[string]string{"k": "v"}, false)
+	newAccess, newRefresh, err := mgr.RefreshFrom(t.Context(), refTok, map[string]string{"k": "v"}, false)
 	if err != nil {
 		t.Fatalf("RefreshFrom: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestRefreshFrom_NoRotate(t *testing.T) {
 	if newRefresh != "" {
 		t.Fatalf("did not expect rotated refresh token")
 	}
-	claims, err := mgr.ParseAccess(newAccess)
+	claims, err := mgr.ParseAccess(t.Context(), newAccess)
 	if err != nil {
 		t.Fatalf("ParseAccess: %v", err)
 	}
@@ -177,11 +177,11 @@ func TestRefreshFrom_Rotate(t *testing.T) {
 	mgr := newTestMgr(t)
 
 	userId := uuid.MustParse("9c21b47e-85c1-480b-a588-b42b6f89cd7a")
-	origRefresh, err := mgr.IssueRefresh(userId)
+	origRefresh, err := mgr.IssueRefresh(t.Context(), userId)
 	if err != nil {
 		t.Fatalf("IssueRefresh: %v", err)
 	}
-	newAccess, newRefresh, err := mgr.RefreshFrom(origRefresh, nil, true)
+	newAccess, newRefresh, err := mgr.RefreshFrom(t.Context(), origRefresh, nil, true)
 	if err != nil {
 		t.Fatalf("RefreshFrom: %v", err)
 	}
@@ -192,10 +192,10 @@ func TestRefreshFrom_Rotate(t *testing.T) {
 		t.Fatalf("expected refresh rotation (different token)")
 	}
 	// Validate both tokens parse
-	if _, err := mgr.ParseAccess(newAccess); err != nil {
+	if _, err := mgr.ParseAccess(t.Context(), newAccess); err != nil {
 		t.Fatalf("ParseAccess(new): %v", err)
 	}
-	if _, err := mgr.ParseRefresh(newRefresh); err != nil {
+	if _, err := mgr.ParseRefresh(t.Context(), newRefresh); err != nil {
 		t.Fatalf("ParseRefresh(new): %v", err)
 	}
 }
@@ -213,18 +213,18 @@ func TestExpiredTokenRejected(t *testing.T) {
 			IssuedAt:  jwt.NewNumericDate(now),
 			NotBefore: jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(-1 * time.Minute)), // expired 1m ago
-			Issuer:    mgr.issuer,
-			Audience:  jwt.ClaimStrings{mgr.audience},
+			Issuer:    "issuer.test",
+			Audience:  jwt.ClaimStrings{"aud.test"},
 		},
 	}
 
 	tk := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err := tk.SignedString(mgr.secret)
+	signed, err := tk.SignedString([]byte("test-secret-32-bytes-minimum-please"))
 	if err != nil {
 		t.Fatalf("sign expired token: %v", err)
 	}
 
-	_, err = mgr.ParseAccess(signed)
+	_, err = mgr.ParseAccess(t.Context(), signed)
 	if err == nil {
 		t.Fatalf("expected parse error for expired token")
 	}

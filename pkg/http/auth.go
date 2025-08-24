@@ -15,15 +15,16 @@ const userIDCtxKey ctxKey = "session_user_id"
 const sessionClaimsCtxKey ctxKey = "session_claims"
 
 type Auth struct {
-	m *session.Manager
+	m session.SessionManager
 }
 
-func NewAuth(mgr *session.Manager) *Auth {
+func NewAuth(mgr session.SessionManager) *Auth {
 	return &Auth{m: mgr}
 }
 
 func (a *Auth) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
 		raw := r.Header.Get("Authorization")
 		if raw == "" {
 			Error(w, http.StatusUnauthorized, "missing authorization header")
@@ -36,7 +37,7 @@ func (a *Auth) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		claims, err := a.m.ParseAccess(parts[1])
+		claims, err := a.m.ParseAccess(ctx, parts[1])
 		if err != nil {
 			Error(w, http.StatusUnauthorized, "invalid or expired token")
 			return
@@ -47,7 +48,7 @@ func (a *Auth) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), userIDCtxKey, claims.Subject)
+		ctx = context.WithValue(ctx, userIDCtxKey, claims.Subject)
 		ctx = context.WithValue(ctx, sessionClaimsCtxKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

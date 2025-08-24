@@ -24,13 +24,20 @@ CREATE TABLE IF NOT EXISTS user_refresh_tokens (
 CREATE INDEX IF NOT EXISTS idx_user_identities_user_id
   ON user_identities (user_id);
 
-CREATE INDEX IF NOT EXISTS idx_user_refresh_tokens_hash
-  ON user_refresh_tokens (hash);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_urt_user_hash
+  ON user_refresh_tokens (user_id, hash);
 
 CREATE INDEX IF NOT EXISTS idx_user_refresh_tokens_expires_at
   ON user_refresh_tokens (expires_at);
+
+  
 -- +goose StatementEnd
 
 -- +goose Down
 -- +goose StatementBegin
+DROP INDEX IF EXISTS idx_user_refresh_tokens_expires_at;
+DROP INDEX IF EXISTS idx_urt_user_hash;
+DROP TABLE IF EXISTS user_refresh_tokens;
+DROP TABLE IF EXISTS user_identities;
+DROP TABLE IF EXISTS users;
 -- +goose StatementEnd

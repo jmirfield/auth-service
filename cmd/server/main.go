@@ -14,8 +14,9 @@ import (
 	"github.com/jmirfield/auth-service/internals/apple"
 	"github.com/jmirfield/auth-service/internals/cache"
 	"github.com/jmirfield/auth-service/internals/handlers"
-	authhttp "github.com/jmirfield/auth-service/pkg/http"
 	"github.com/jmirfield/auth-service/internals/repository/postgres"
+	sessionx "github.com/jmirfield/auth-service/internals/session"
+	authhttp "github.com/jmirfield/auth-service/pkg/http"
 	"github.com/jmirfield/auth-service/pkg/session"
 )
 
@@ -47,7 +48,11 @@ func main() {
 		cancel()
 	}
 
-	var usrstore = postgres.NewUserRepo(pool)
+	usrstore, err := postgres.NewUserRepo(pool)
+	if err != nil {
+		log.Fatalf("failed to create user repo: %v", err)
+	}
+
 	go func(ctx context.Context) {
 		t := time.NewTicker(12 * time.Hour)
 		defer t.Stop()
@@ -84,12 +89,20 @@ func main() {
 		log.Fatal(err)
 	}
 
-	sessionHandler, err := handlers.NewSessionHandler(sessionMgr, usrstore)
+	sessionSvc, err := sessionx.NewService(usrstore, sessionMgr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	sessionHandler, err := handlers.NewSessionHandler(sessionSvc)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	appleHandler, err := handlers.NewAppleHandler(appleCfg, usrstore, sessionMgr, appleMgr)
+	appleSvc, err := apple.NewService(appleMgr, sessionMgr, usrstore)
+	if err != nil {
+		log.Fatal(err)
+	}
+	appleHandler, err := handlers.NewAppleHandler(appleSvc)
 	if err != nil {
 		log.Fatal(err)
 	}

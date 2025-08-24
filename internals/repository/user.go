@@ -9,14 +9,17 @@ import (
 	"github.com/jmirfield/auth-service/internals/domain/user"
 )
 
-var ErrNotFound = errors.New("not found")
+var (
+	ErrNotFound  = errors.New("not found")
+	ErrDuplicate = errors.New("duplicate found")
+)
 
 type UserReader interface {
 	// GetUser returns a user by ID or ErrNotFound.
 	GetUser(ctx context.Context, id uuid.UUID) (*user.User, error)
 	// GetUserIDByIdentity maps (provider, sub) -> user_id or ErrNotFound.
 	GetUserIDByIdentity(ctx context.Context, provider, sub string) (uuid.UUID, error)
-	GetIdentityBySub(ctx context.Context, sub string) (*user.Identity, error)
+	GetIdentity(ctx context.Context, provider, sub string) (*user.Identity, error)
 	// FindRefreshTokenByHash returns a refresh token for a user by its hash or ErrNotFound.
 	FindRefreshTokenByHash(ctx context.Context, userID uuid.UUID, hash string) (user.RefreshToken, error)
 }
@@ -45,7 +48,18 @@ type UserWriter interface {
 	PruneExpiredRefreshTokens(ctx context.Context, now time.Time) (int64, error)
 }
 
+type TxRunner interface {
+	WithTx(ctx context.Context, fn func(ctx context.Context, rw UserTx) error) error
+}
+
+type UserTx interface {
+	UserReader
+	UserWriter
+	AdvisoryLockIdentity(ctx context.Context, provider, sub string) error
+}
+
 type UserReadWriter interface {
 	UserReader
 	UserWriter
+	TxRunner
 }
