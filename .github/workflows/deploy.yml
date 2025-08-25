@@ -47,6 +47,10 @@ jobs:
             file: Dockerfile.migration
             image: ${{ vars.IMAGE_NAME }}
             flavor_suffix: "-migration"
+          - name: prune
+            file: Dockerfile.prune
+            image: ${{ vars.IMAGE_NAME }}
+            flavor_suffix: "-prune"
     steps:
       - name: Checkout
         uses: actions/checkout@v4

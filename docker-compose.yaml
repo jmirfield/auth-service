@@ -24,7 +24,6 @@ services:
       db:
         condition: service_healthy
     environment:
-      # Goose can read these; then you can just run `goose up`
       GOOSE_DRIVER: postgres
       GOOSE_DBSTRING: postgres://auth_user:auth_pass@db:5432/auth_db?sslmode=disable
     command: ["-dir", "/migrations", "up"]
@@ -44,7 +43,19 @@ services:
       APPLE_PRIVATE_KEY_PATH: /run/keys/AppleKey.p8
       DATABASE_URL: postgres://auth_user:auth_pass@db:5432/auth_db?sslmode=disable
     ports:
-      - "3000:8080"
+      - "8080:8080"
+
+  pruner:
+    build:
+      context: .
+      dockerfile: Dockerfile.prune 
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://auth_user:auth_pass@db:5432/auth_db?sslmode=disable
+    entrypoint: ["sh","-c","while true; do /app/prune || echo prune failed; sleep 300; done"]
+    restart: unless-stopped
 
   adminer:
     image: adminer

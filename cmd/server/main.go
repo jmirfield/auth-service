@@ -48,25 +48,10 @@ func main() {
 		cancel()
 	}
 
-	usrstore, err := postgres.NewUserRepo(pool)
+	userstore, err := postgres.NewUserRepo(pool)
 	if err != nil {
 		log.Fatalf("failed to create user repo: %v", err)
 	}
-
-	go func(ctx context.Context) {
-		t := time.NewTicker(12 * time.Hour)
-		defer t.Stop()
-		for {
-			select {
-			case <-t.C:
-				if n, err := usrstore.PruneExpiredRefreshTokens(ctx, time.Now()); err == nil && n > 0 {
-					log.Printf("pruned %d expired refresh tokens", n)
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
-	}(ctx)
 
 	appleCfg, err := apple.Load()
 	if err != nil {
@@ -89,7 +74,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	sessionSvc, err := sessionx.NewService(usrstore, sessionMgr)
+	sessionSvc, err := sessionx.NewService(userstore, sessionMgr)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -98,7 +83,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	appleSvc, err := apple.NewService(appleMgr, sessionMgr, usrstore)
+	appleSvc, err := apple.NewService(appleMgr, sessionMgr, userstore)
 	if err != nil {
 		log.Fatal(err)
 	}

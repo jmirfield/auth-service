@@ -381,7 +381,7 @@ func TestAuth_ConcurrentFirstLogin_SerializesIdentity(t *testing.T) {
 	wg.Add(N)
 	start := make(chan struct{})
 
-	for i := range N {
+	for i := range N { // FIX: proper loops
 		go func(idx int) {
 			defer wg.Done()
 			sm := newFakeSessionManager()

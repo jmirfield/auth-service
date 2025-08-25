@@ -26,11 +26,17 @@ type UserRepo struct {
 	q    pgxQuerier
 }
 
+func NewUserRepoFromQuerier(q pgxQuerier) (repository.UserReadWriter, error) {
+	if q == nil {
+		return nil, errors.New("pgxQuerier is nil")
+	}
+	return &UserRepo{q: q}, nil
+}
+
 func NewUserRepo(pool *pgxpool.Pool) (repository.UserReadWriter, error) {
 	if pool == nil {
 		return nil, errors.New("pgxpool.Pool is nil")
 	}
-
 	return &UserRepo{pool: pool, q: pool}, nil
 }
 
@@ -174,8 +180,23 @@ func (r *UserRepo) PruneExpiredRefreshTokens(ctx context.Context, now time.Time)
 	return cmd.RowsAffected(), nil
 }
 
+// local interface for anything that can start a tx
+type txStarter interface {
+	BeginTx(ctx context.Context, txOptions pgx.TxOptions) (pgx.Tx, error)
+}
+
 func (r *UserRepo) WithTx(ctx context.Context, fn func(ctx context.Context, rw repository.UserTx) error) error {
-	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{
+	// Prefer pool if present; otherwise try q
+	var starter txStarter
+	if r.pool != nil {
+		starter = r.pool
+	} else if ts, ok := r.q.(txStarter); ok {
+		starter = ts // *pgx.Conn or *pgxpool.Conn both satisfy this
+	} else {
+		return errors.New("repo cannot start transactions: no pool/connection available")
+	}
+
+	tx, err := starter.BeginTx(ctx, pgx.TxOptions{
 		IsoLevel:       pgx.ReadCommitted,
 		AccessMode:     pgx.ReadWrite,
 		DeferrableMode: pgx.NotDeferrable,
@@ -183,7 +204,6 @@ func (r *UserRepo) WithTx(ctx context.Context, fn func(ctx context.Context, rw r
 	if err != nil {
 		return err
 	}
-
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout = '3s'`); err != nil {
@@ -196,6 +216,7 @@ func (r *UserRepo) WithTx(ctx context.Context, fn func(ctx context.Context, rw r
 		return err
 	}
 
+	// Re-wrap the repo with the tx as the querier
 	if err := fn(ctx, &UserRepo{pool: r.pool, q: tx}); err != nil {
 		return err
 	}
