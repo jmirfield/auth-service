@@ -31,28 +31,33 @@ func main() {
 
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
-		log.Fatal("DATABASE_URL is required")
+		log.Println("DATABASE_URL is required")
+		return
 	}
 
 	cfg, err := pgx.ParseConfig(dsn)
 	if err != nil {
-		log.Fatalf("parse DATABASE_URL: %v", err)
+		log.Printf("parse DATABASE_URL: %v", err)
+		return
 	}
 
 	conn, err := pgx.ConnectConfig(ctx, cfg)
 	if err != nil {
-		log.Fatalf("connect: %v", err)
+		log.Printf("connect: %v", err)
+		return
 	}
 	defer conn.Close(context.Background())
 
 	repo, err := postgres.NewUserRepoFromQuerier(conn)
 	if err != nil {
-		log.Fatalf("repo: %v", err)
+		log.Printf("repo: %v", err)
+		return
 	}
 
 	var gotLock bool
 	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", int64(42)).Scan(&gotLock); err != nil {
-		log.Fatalf("lock: %v", err)
+		log.Printf("lock: %v", err)
+		return
 	}
 	if !gotLock {
 		return
@@ -67,13 +72,15 @@ func main() {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Fatalf("cancelled/timeout after deleting %d", total)
+			log.Printf("cancelled/timeout after deleting %d", total)
+			return
 		default:
 		}
 
 		count, err := repo.PruneExpiredRefreshTokens(ctx, time.Now())
 		if err != nil {
-			log.Fatalf("prune: %v", err)
+			log.Printf("prune: %v", err)
+			return
 		}
 		total += count
 		if count == 0 {
