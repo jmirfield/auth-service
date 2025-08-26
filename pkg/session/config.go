@@ -15,6 +15,12 @@ type Config struct {
 	ClockSkewLeeway time.Duration
 }
 
+const (
+	DefaultAccessTTL       = 10 * time.Minute
+	DefaultRefreshTTL      = 30 * 24 * time.Hour
+	DefaultClockSkewLeeway = 30 * time.Second
+)
+
 func (c *Config) Validate() error {
 	if c.Secret == "" {
 		return errors.New("missing required session secret env var")
@@ -50,18 +56,21 @@ func Load() (*Config, error) {
 		Audience: os.Getenv("APP_JWT_AUDIENCE"),
 	}
 
+	cfg.AccessLifetime = DefaultAccessTTL
 	if s := os.Getenv("APP_JWT_ACCESS_LIFETIME"); s != "" {
 		if d, err := time.ParseDuration(s); err == nil && d > 0 {
 			cfg.AccessLifetime = d
 		}
 	}
 
+	cfg.RefreshLifetime = DefaultRefreshTTL
 	if s := os.Getenv("APP_JWT_REFRESH_LIFETIME"); s != "" {
 		if d, err := time.ParseDuration(s); err == nil && d > 0 {
 			cfg.RefreshLifetime = d
 		}
 	}
 
+	cfg.ClockSkewLeeway = DefaultClockSkewLeeway
 	if s := os.Getenv("APP_JWT_CLOCK_SKEW_LEEWAY"); s != "" {
 		if d, err := time.ParseDuration(s); err == nil && d >= 0 {
 			cfg.ClockSkewLeeway = d
