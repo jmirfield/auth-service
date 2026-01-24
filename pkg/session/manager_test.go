@@ -1,9 +1,12 @@
 package session
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
 	"errors"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,8 +17,11 @@ import (
 // helper to build a test manager with sane defaults
 func newTestMgr(t *testing.T, opts ...func(*Config)) SessionManager {
 	t.Helper()
+	key := testRSAKey(t)
 	cfg := &Config{
-		Secret:          "test-secret-32-bytes-minimum-please",
+		KeyID:           "test-kid",
+		PrivateKey:      key,
+		PublicKeys:      map[string]*rsa.PublicKey{"test-kid": &key.PublicKey},
 		Issuer:          "issuer.test",
 		Audience:        "aud.test",
 		AccessLifetime:  15 * time.Minute,
@@ -30,6 +36,21 @@ func newTestMgr(t *testing.T, opts ...func(*Config)) SessionManager {
 		t.Fatalf("New manager: %v", err)
 	}
 	return mgr
+}
+
+var testKeyOnce sync.Once
+var testKey *rsa.PrivateKey
+
+func testRSAKey(t *testing.T) *rsa.PrivateKey {
+	t.Helper()
+	testKeyOnce.Do(func() {
+		key, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			t.Fatalf("generate RSA key: %v", err)
+		}
+		testKey = key
+	})
+	return testKey
 }
 
 func TestIssueAndParseAccess(t *testing.T) {
@@ -101,7 +122,9 @@ func TestInvalidIssuer(t *testing.T) {
 	// Parse with issuer B (same secret & aud) -> should fail issuer check
 	issuerB := newTestMgr(t, func(c *Config) {
 		c.Issuer = "issuerB"
-		c.Secret = "test-secret-32-bytes-minimum-please" // keep same secret to pass signature
+		key := testRSAKey(t)
+		c.PrivateKey = key
+		c.PublicKeys = map[string]*rsa.PublicKey{"test-kid": &key.PublicKey}
 	})
 	_, err = issuerB.ParseAccess(t.Context(), tok)
 	if err == nil || !strings.Contains(err.Error(), "invalid issuer") {
@@ -120,8 +143,9 @@ func TestInvalidAudience(t *testing.T) {
 	// Parse with audience B (same secret & issuer) -> should fail audience check
 	audB := newTestMgr(t, func(c *Config) {
 		c.Audience = "audB"
-		c.Secret = "test-secret-32-bytes-minimum-please"
-		c.Issuer = "issuer.test"
+		key := testRSAKey(t)
+		c.PrivateKey = key
+		c.PublicKeys = map[string]*rsa.PublicKey{"test-kid": &key.PublicKey}
 	})
 	_, err = audB.ParseAccess(t.Context(), tok)
 	if err == nil || !strings.Contains(err.Error(), "invalid audience") {
@@ -218,8 +242,10 @@ func TestExpiredTokenRejected(t *testing.T) {
 		},
 	}
 
-	tk := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err := tk.SignedString([]byte("test-secret-32-bytes-minimum-please"))
+	key := testRSAKey(t)
+	tk := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	tk.Header["kid"] = "test-kid"
+	signed, err := tk.SignedString(key)
 	if err != nil {
 		t.Fatalf("sign expired token: %v", err)
 	}

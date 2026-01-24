@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"crypto/rsa"
 	"errors"
 	"slices"
 	"time"
@@ -22,7 +23,9 @@ type Claims struct {
 }
 
 type Manager struct {
-	secret          []byte
+	keyID           string
+	privateKey      *rsa.PrivateKey
+	publicKeys      map[string]*rsa.PublicKey
 	issuer          string
 	audience        string
 	accessTTL       time.Duration
@@ -35,7 +38,9 @@ func NewManager(cfg *Config) (SessionManager, error) {
 		return nil, errors.New("missing config")
 	}
 	return &Manager{
-		secret:          []byte(cfg.Secret),
+		keyID:           cfg.KeyID,
+		privateKey:      cfg.PrivateKey,
+		publicKeys:      cfg.PublicKeys,
 		issuer:          cfg.Issuer,
 		audience:        cfg.Audience,
 		accessTTL:       cfg.AccessLifetime,
@@ -83,13 +88,14 @@ func (m *Manager) issue(userID uuid.UUID, attrs map[string]string, typ string, t
 		ID:        uuid.NewString(),
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, Claims{
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, Claims{
 		Attrs:            attrs,
 		TokenType:        typ,
 		RegisteredClaims: rc,
 	})
+	token.Header["kid"] = m.keyID
 
-	return token.SignedString(m.secret)
+	return token.SignedString(m.privateKey)
 }
 
 func (m *Manager) ParseAccess(_ context.Context, tokenString string) (*Claims, error) {
@@ -127,13 +133,27 @@ func (m *Manager) parseTyped(tokStr, wantType string) (*Claims, error) {
 	}
 
 	parser := jwt.NewParser(
-		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithValidMethods([]string{jwt.SigningMethodRS256.Alg()}),
 		jwt.WithLeeway(m.clockSkewLeeway),
 	)
 
 	claims := &Claims{}
 	_, err := parser.ParseWithClaims(tokStr, claims, func(t *jwt.Token) (any, error) {
-		return m.secret, nil
+		kid, _ := t.Header["kid"].(string)
+		if kid == "" {
+			if len(m.publicKeys) == 1 {
+				for _, key := range m.publicKeys {
+					return key, nil
+				}
+			}
+			return nil, errors.New("missing kid")
+		}
+
+		key, ok := m.publicKeys[kid]
+		if !ok {
+			return nil, errors.New("unknown kid")
+		}
+		return key, nil
 	})
 
 	if err != nil {

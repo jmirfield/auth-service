@@ -24,9 +24,11 @@ A small Go service that handles Sign in with Apple, session issuance/refresh, an
 
 **.env keys (dummy example):**
 ```dotenv
-# App JWT
-APP_JWT_SECRET=dev-supersecret-change-me
-APP_JWT_ISSUER=auth-service
+# App JWT (RS256)
+APP_JWT_KEY_ID=dev-1
+APP_JWT_PRIVATE_KEY_PATH=./secrets/jwt_private.pem
+APP_JWT_PUBLIC_KEYS=dev-1:./secrets/jwt_public.pem
+APP_JWT_ISSUER=https://auth.example.com
 APP_JWT_AUDIENCE=auth-service-clients
 APP_JWT_ACCESS_LIFETIME=15m
 APP_JWT_REFRESH_LIFETIME=720h
@@ -99,6 +101,12 @@ services:
 
 - `POST /token/revoke/all` *(auth required)*  
   Revoke all refresh tokens for the current user.
+
+- `GET /.well-known/jwks.json`  
+  Publish public keys for access/refresh token verification.
+
+- `GET /.well-known/openid-configuration`  
+  OIDC discovery metadata (issuer/JWKS/token endpoint).
 
 ## TODO
 Add auth support for:
