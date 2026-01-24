@@ -48,6 +48,10 @@ DATABASE_URL=postgres://auth_user:auth_pass@localhost:5432/auth_db?sslmode=disab
 
 # HTTP
 PORT=3000
+
+# Rate limits
+RATE_LIMIT_MAX=60
+RATE_LIMIT_WINDOW=1m
 ```
 
 ## Running with Docker Compose

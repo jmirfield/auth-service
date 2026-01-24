@@ -15,6 +15,7 @@ import (
 	"github.com/jmirfield/auth-service/internals/cache"
 	"github.com/jmirfield/auth-service/internals/handlers"
 	"github.com/jmirfield/auth-service/internals/idp"
+	"github.com/jmirfield/auth-service/internals/ratelimit"
 	"github.com/jmirfield/auth-service/internals/repository/postgres"
 	sessionx "github.com/jmirfield/auth-service/internals/session"
 	authhttp "github.com/jmirfield/auth-service/pkg/http"
@@ -85,6 +86,9 @@ func main() {
 		return
 	}
 
+	rlCfg := ratelimit.Load()
+	globalLimiter := ratelimit.NewLimiter(rlCfg.Max, rlCfg.Window)
+
 	client := &http.Client{Timeout: 10 * time.Second}
 	appleMgr, err := apple.NewManager(appleCfg, cache.NewMemory[rsa.PublicKey](ctx), client)
 	if err != nil {
@@ -140,6 +144,8 @@ func main() {
 	mux.HandleFunc("GET /.well-known/jwks.json", wellKnownHandler.JWKS)
 	mux.HandleFunc("GET /.well-known/openid-configuration", wellKnownHandler.OpenIDConfig)
 
+	handler := authhttp.RateLimit(globalLimiter)(mux)
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -147,7 +153,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              ":" + port,
-		Handler:           mux,
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,
