@@ -14,6 +14,7 @@ import (
 	"github.com/jmirfield/auth-service/internals/apple"
 	"github.com/jmirfield/auth-service/internals/cache"
 	"github.com/jmirfield/auth-service/internals/handlers"
+	"github.com/jmirfield/auth-service/internals/idp"
 	"github.com/jmirfield/auth-service/internals/repository/postgres"
 	sessionx "github.com/jmirfield/auth-service/internals/session"
 	authhttp "github.com/jmirfield/auth-service/pkg/http"
@@ -78,6 +79,11 @@ func main() {
 		log.Printf("failed to create session manager: %v", err)
 		return
 	}
+	jwksProvider, ok := sessionMgr.(session.JWKSProvider)
+	if !ok {
+		log.Printf("session manager does not support JWKS publishing")
+		return
+	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	appleMgr, err := apple.NewManager(appleCfg, cache.NewMemory[rsa.PublicKey](ctx), client)
@@ -97,24 +103,42 @@ func main() {
 		return
 	}
 
-	appleSvc, err := apple.NewService(appleMgr, sessionMgr, userstore)
+	registry := idp.NewRegistry()
+	appleProvider, err := idp.NewAppleProvider(appleMgr)
 	if err != nil {
-		log.Printf("failed to create apple service: %v", err)
+		log.Printf("failed to create apple provider: %v", err)
 		return
 	}
-	appleHandler, err := handlers.NewAppleHandler(appleSvc)
+	if err := registry.Register(appleProvider); err != nil {
+		log.Printf("failed to register apple provider: %v", err)
+		return
+	}
+
+	idpSvc, err := idp.NewService(registry, sessionMgr, userstore)
 	if err != nil {
-		log.Printf("failed to create apple handler: %v", err)
+		log.Printf("failed to create idp service: %v", err)
+		return
+	}
+	idpHandler, err := handlers.NewIdpHandler(idpSvc)
+	if err != nil {
+		log.Printf("failed to create idp handler: %v", err)
+		return
+	}
+	wellKnownHandler, err := handlers.NewWellKnownHandler(sessionCfg.Issuer, jwksProvider)
+	if err != nil {
+		log.Printf("failed to create well-known handler: %v", err)
 		return
 	}
 
 	authMiddleware := authhttp.NewAuth(sessionMgr).Middleware
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /token/apple", appleHandler.Auth)
+	mux.HandleFunc("POST /token/{provider}", idpHandler.Auth)
 	mux.HandleFunc("POST /token/refresh", sessionHandler.Refresh)
 	mux.Handle("POST /token/revoke", authMiddleware(http.HandlerFunc(sessionHandler.RevokeSingle)))
 	mux.Handle("POST /token/revoke/all", authMiddleware(http.HandlerFunc(sessionHandler.RevokeAll)))
+	mux.HandleFunc("GET /.well-known/jwks.json", wellKnownHandler.JWKS)
+	mux.HandleFunc("GET /.well-known/openid-configuration", wellKnownHandler.OpenIDConfig)
 
 	port := os.Getenv("PORT")
 	if port == "" {

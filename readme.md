@@ -89,8 +89,9 @@ services:
 
 ## API Endpoints
 
-- `POST /token/apple`  
-  Exchange Apple authorization code, verify ID token, upsert user/identity, issue app tokens.  
+- `POST /token/{provider}`  
+  Exchange provider authorization code, verify ID token, upsert user/identity, issue app tokens.  
+  **Example:** `/token/apple`
   **Response:** `{ "access_token": "...", "refresh_token": "..." }`
 
 - `POST /token/refresh`  
