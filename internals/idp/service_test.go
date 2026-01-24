@@ -1,4 +1,4 @@
-package apple_test
+package idp_test
 
 import (
 	"context"
@@ -12,8 +12,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
-	apple "github.com/jmirfield/auth-service/internals/apple"
 	"github.com/jmirfield/auth-service/internals/domain/user"
+	"github.com/jmirfield/auth-service/internals/idp"
+	"github.com/jmirfield/auth-service/internals/repository"
 	"github.com/jmirfield/auth-service/internals/repository/postgres"
 	"github.com/jmirfield/auth-service/internals/secret"
 	"github.com/jmirfield/auth-service/internals/test"
@@ -68,20 +69,27 @@ func countAllRefreshTokens(t *testing.T, pool *pgxpool.Pool) int {
 	return n
 }
 
-type fakeAppleManager struct {
-	exchangeCodeFunc func(ctx context.Context, code string) (*apple.TokenResponse, error)
-	refreshFunc      func(ctx context.Context, tok string) (*apple.TokenResponse, error)
-	verifyFunc       func(ctx context.Context, tok string, nonce ...string) (*apple.Claims, error)
+type fakeProvider struct {
+	name          string
+	providerID    string
+	exchangeFunc  func(ctx context.Context, code string) (string, error)
+	verifyIDFunc  func(ctx context.Context, idToken string, nonce string) (*idp.Claims, error)
 }
 
-func (f *fakeAppleManager) ExchangeCode(ctx context.Context, code string) (*apple.TokenResponse, error) {
-	return f.exchangeCodeFunc(ctx, code)
+func (f *fakeProvider) Name() string {
+	return f.name
 }
-func (f *fakeAppleManager) Refresh(ctx context.Context, tok string) (*apple.TokenResponse, error) {
-	return f.refreshFunc(ctx, tok)
+
+func (f *fakeProvider) ProviderID() string {
+	return f.providerID
 }
-func (f *fakeAppleManager) VerifyIDToken(ctx context.Context, tok string, nonce ...string) (*apple.Claims, error) {
-	return f.verifyFunc(ctx, tok, nonce...)
+
+func (f *fakeProvider) ExchangeCode(ctx context.Context, code string) (string, error) {
+	return f.exchangeFunc(ctx, code)
+}
+
+func (f *fakeProvider) VerifyIDToken(ctx context.Context, idToken string, nonce string) (*idp.Claims, error) {
+	return f.verifyIDFunc(ctx, idToken, nonce)
 }
 
 var errBadTok = jwt.ErrTokenMalformed
@@ -106,7 +114,6 @@ func (f *fakeSessionManager) IssuePair(ctx context.Context, uid uuid.UUID, extra
 	if f.issuePairFunc != nil {
 		return f.issuePairFunc(ctx, uid, extra)
 	}
-	// Default: make unique tokens + register claims
 	ref := "refresh-" + uuid.NewString()
 	acc := "access-" + uuid.NewString()
 	f.mu.Lock()
@@ -139,7 +146,6 @@ func (f *fakeSessionManager) RefreshFrom(ctx context.Context, old string, extra 
 	if !rotate {
 		return "access-" + uuid.NewString(), "", nil
 	}
-	// Rotate to new refresh; inherit subject from old
 	cOld, _ := f.ParseRefresh(ctx, old)
 	ref := "refresh-" + uuid.NewString()
 	acc := "access-" + uuid.NewString()
@@ -157,6 +163,7 @@ func (f *fakeSessionManager) RefreshFrom(ctx context.Context, old string, extra 
 func (f *fakeSessionManager) IssueAccess(ctx context.Context, uid uuid.UUID, extra map[string]string) (string, error) {
 	return "access-" + uuid.NewString(), nil
 }
+
 func (f *fakeSessionManager) IssueRefresh(ctx context.Context, uid uuid.UUID) (string, error) {
 	ref := "refresh-" + uuid.NewString()
 	f.mu.Lock()
@@ -168,8 +175,22 @@ func (f *fakeSessionManager) IssueRefresh(ctx context.Context, uid uuid.UUID) (s
 	f.mu.Unlock()
 	return ref, nil
 }
+
 func (f *fakeSessionManager) ParseAccess(ctx context.Context, tok string) (*session.Claims, error) {
 	return &session.Claims{}, nil
+}
+
+func newService(t *testing.T, repo repository.UserReadWriter, provider *fakeProvider, sm session.SessionManager) *idp.Service {
+	t.Helper()
+	reg := idp.NewRegistry()
+	if err := reg.Register(provider); err != nil {
+		t.Fatalf("register provider: %v", err)
+	}
+	svc, err := idp.NewService(reg, sm, repo)
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	return svc
 }
 
 func TestAuth_FirstLogin_CreatesIdentity_StoresRefresh(t *testing.T) {
@@ -181,24 +202,21 @@ func TestAuth_FirstLogin_CreatesIdentity_StoresRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	am := &fakeAppleManager{
-		exchangeCodeFunc: func(ctx context.Context, code string) (*apple.TokenResponse, error) {
-			return &apple.TokenResponse{IDToken: "idtok"}, nil
+	provider := &fakeProvider{
+		name:       "apple",
+		providerID: user.ProviderApple,
+		exchangeFunc: func(ctx context.Context, code string) (string, error) {
+			return "idtok", nil
 		},
-		verifyFunc: func(ctx context.Context, tok string, nonce ...string) (*apple.Claims, error) {
-			return &apple.Claims{RegisteredClaims: jwt.RegisteredClaims{Subject: "sub-123", Issuer: "iss"}}, nil
+		verifyIDFunc: func(ctx context.Context, tok string, nonce string) (*idp.Claims, error) {
+			return &idp.Claims{Subject: "sub-123", Issuer: "iss"}, nil
 		},
-		refreshFunc: func(ctx context.Context, tok string) (*apple.TokenResponse, error) { return nil, nil },
 	}
 
 	sm := newFakeSessionManager()
+	svc := newService(t, repo, provider, sm)
 
-	svc, err := apple.NewService(am, sm, repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	access, refresh, err := svc.Auth(t.Context(), "code-ok", "nonce-ok")
+	access, refresh, err := svc.Auth(t.Context(), "apple", "code-ok", "nonce-ok")
 	if err != nil {
 		t.Fatalf("Auth: %v", err)
 	}
@@ -226,23 +244,23 @@ func TestAuth_BadCode_NoSideEffects(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	am := &fakeAppleManager{
-		exchangeCodeFunc: func(ctx context.Context, code string) (*apple.TokenResponse, error) {
-			return nil, apple.ErrBadCode
+	provider := &fakeProvider{
+		name:       "apple",
+		providerID: user.ProviderApple,
+		exchangeFunc: func(ctx context.Context, code string) (string, error) {
+			return "", errors.New("bad code")
 		},
-		verifyFunc: func(ctx context.Context, tok string, nonce ...string) (*apple.Claims, error) {
+		verifyIDFunc: func(ctx context.Context, tok string, nonce string) (*idp.Claims, error) {
 			t.Fatal("VerifyIDToken should not be called on bad code")
 			return nil, nil
 		},
-		refreshFunc: func(ctx context.Context, tok string) (*apple.TokenResponse, error) { return nil, nil },
 	}
 
 	sm := newFakeSessionManager()
+	svc := newService(t, repo, provider, sm)
 
-	svc, _ := apple.NewService(am, sm, repo)
-
-	_, _, err = svc.Auth(t.Context(), "bad-code", "nonce")
-	if !errors.Is(err, apple.ErrBadCode) {
+	_, _, err = svc.Auth(t.Context(), "apple", "bad-code", "nonce")
+	if !errors.Is(err, idp.ErrBadCode) {
 		t.Fatalf("want ErrBadCode, got %v", err)
 	}
 
@@ -261,21 +279,21 @@ func TestAuth_InvalidIDToken_NoSideEffects(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	am := &fakeAppleManager{
-		exchangeCodeFunc: func(ctx context.Context, code string) (*apple.TokenResponse, error) {
-			return &apple.TokenResponse{IDToken: "idtok"}, nil
+	provider := &fakeProvider{
+		name:       "apple",
+		providerID: user.ProviderApple,
+		exchangeFunc: func(ctx context.Context, code string) (string, error) {
+			return "idtok", nil
 		},
-		verifyFunc: func(ctx context.Context, tok string, nonce ...string) (*apple.Claims, error) {
-			return nil, apple.ErrInvalidToken
+		verifyIDFunc: func(ctx context.Context, tok string, nonce string) (*idp.Claims, error) {
+			return nil, errors.New("invalid token")
 		},
-		refreshFunc: func(ctx context.Context, tok string) (*apple.TokenResponse, error) { return nil, nil },
 	}
 	sm := newFakeSessionManager()
+	svc := newService(t, repo, provider, sm)
 
-	svc, _ := apple.NewService(am, sm, repo)
-
-	_, _, err = svc.Auth(t.Context(), "code-ok", "nonce")
-	if !errors.Is(err, apple.ErrInvalidToken) {
+	_, _, err = svc.Auth(t.Context(), "apple", "code-ok", "nonce")
+	if !errors.Is(err, idp.ErrInvalidToken) {
 		t.Fatalf("want ErrInvalidToken, got %v", err)
 	}
 
@@ -306,21 +324,21 @@ func TestAuth_ExistingIdentity_NoNewUser_StoresRefresh(t *testing.T) {
 
 	usersBefore := countUsers(t, pool)
 
-	am := &fakeAppleManager{
-		exchangeCodeFunc: func(ctx context.Context, code string) (*apple.TokenResponse, error) {
-			return &apple.TokenResponse{IDToken: "idtok"}, nil
+	provider := &fakeProvider{
+		name:       "apple",
+		providerID: user.ProviderApple,
+		exchangeFunc: func(ctx context.Context, code string) (string, error) {
+			return "idtok", nil
 		},
-		verifyFunc: func(ctx context.Context, tok string, nonce ...string) (*apple.Claims, error) {
-			return &apple.Claims{RegisteredClaims: jwt.RegisteredClaims{Subject: "sub-123", Issuer: "iss"}}, nil
+		verifyIDFunc: func(ctx context.Context, tok string, nonce string) (*idp.Claims, error) {
+			return &idp.Claims{Subject: "sub-123", Issuer: "iss"}, nil
 		},
-		refreshFunc: func(ctx context.Context, tok string) (*apple.TokenResponse, error) { return nil, nil },
 	}
 
 	sm := newFakeSessionManager()
+	svc := newService(t, repo, provider, sm)
 
-	svc, _ := apple.NewService(am, sm, repo)
-
-	access, refresh, err := svc.Auth(t.Context(), "code-ok", "nonce")
+	access, refresh, err := svc.Auth(t.Context(), "apple", "code-ok", "nonce")
 	if err != nil {
 		t.Fatalf("Auth: %v", err)
 	}
@@ -363,15 +381,19 @@ func TestAuth_ConcurrentFirstLogin_SerializesIdentity(t *testing.T) {
 		issuer   = "iss"
 	)
 
-	am := &fakeAppleManager{
-		exchangeCodeFunc: func(ctx context.Context, code string) (*apple.TokenResponse, error) {
-			return &apple.TokenResponse{IDToken: "idtok"}, nil
+	fake := &fakeProvider{
+		name:       "apple",
+		providerID: provider,
+		exchangeFunc: func(ctx context.Context, code string) (string, error) {
+			return "idtok", nil
 		},
-		verifyFunc: func(ctx context.Context, tok string, nonce ...string) (*apple.Claims, error) {
-			return &apple.Claims{RegisteredClaims: jwt.RegisteredClaims{Subject: subject, Issuer: issuer}}, nil
+		verifyIDFunc: func(ctx context.Context, tok string, nonce string) (*idp.Claims, error) {
+			return &idp.Claims{Subject: subject, Issuer: issuer}, nil
 		},
-		refreshFunc: func(ctx context.Context, tok string) (*apple.TokenResponse, error) { return nil, nil },
 	}
+
+	sm := newFakeSessionManager()
+	svc := newService(t, repo, fake, sm)
 
 	errs := make([]error, N)
 	accesses := make([]string, N)
@@ -381,19 +403,11 @@ func TestAuth_ConcurrentFirstLogin_SerializesIdentity(t *testing.T) {
 	wg.Add(N)
 	start := make(chan struct{})
 
-	for i := range N { // FIX: proper loops
+	for i := 0; i < N; i++ {
 		go func(idx int) {
 			defer wg.Done()
-			sm := newFakeSessionManager()
-
-			svc, serr := apple.NewService(am, sm, repo)
-			if serr != nil {
-				errs[idx] = serr
-				return
-			}
-
 			<-start
-			a, r, serr := svc.Auth(context.Background(), "code-ok", "nonce-ok")
+			a, r, serr := svc.Auth(context.Background(), "apple", "code-ok", "nonce-ok")
 			if serr != nil {
 				errs[idx] = serr
 				return
@@ -406,31 +420,26 @@ func TestAuth_ConcurrentFirstLogin_SerializesIdentity(t *testing.T) {
 	close(start)
 	wg.Wait()
 
-	// no goroutine should error
 	for i, e := range errs {
 		if e != nil {
 			t.Fatalf("goroutine %d error: %v", i, e)
 		}
 	}
-	// tokens non-empty
 	for i := 0; i < N; i++ {
 		if accesses[i] == "" || refreshes[i] == "" {
 			t.Fatalf("goroutine %d returned empty tokens", i)
 		}
 	}
 
-	// exactly one identity
 	if got := countIdentities(t, pool, provider, subject); got != 1 {
 		t.Fatalf("identities count = %d, want 1", got)
 	}
 	finalUID := getIdentityUID(t, pool, provider, subject)
 
-	// exactly one user
 	if users := countUsers(t, pool); users != 1 {
 		t.Fatalf("users count = %d, want 1", users)
 	}
 
-	// N unique refresh tokens (no UNIQUE (user_id,hash) collisions)
 	if got := countAllRefreshTokens(t, pool); got != N {
 		t.Fatalf("refresh tokens total = %d, want %d", got, N)
 	}
