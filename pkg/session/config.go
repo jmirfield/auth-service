@@ -86,7 +86,7 @@ func Load() (*Config, error) {
 	cfg.PublicKeys = make(map[string]*rsa.PublicKey)
 	publicKeysEnv := os.Getenv("APP_JWT_PUBLIC_KEYS")
 	if publicKeysEnv != "" {
-		for _, pair := range strings.Split(publicKeysEnv, ",") {
+		for pair := range strings.SplitSeq(publicKeysEnv, ",") {
 			pair = strings.TrimSpace(pair)
 			if pair == "" {
 				continue
