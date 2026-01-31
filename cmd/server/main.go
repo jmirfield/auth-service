@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/rsa"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,6 +14,7 @@ import (
 	"github.com/jmirfield/auth-service/internals/cache"
 	"github.com/jmirfield/auth-service/internals/handlers"
 	"github.com/jmirfield/auth-service/internals/idp"
+	"github.com/jmirfield/auth-service/internals/logging"
 	"github.com/jmirfield/auth-service/internals/ratelimit"
 	"github.com/jmirfield/auth-service/internals/repository/postgres"
 	sessionx "github.com/jmirfield/auth-service/internals/session"
@@ -26,14 +26,20 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	serviceName := os.Getenv("SERVICE_NAME")
+	if serviceName == "" {
+		serviceName = "auth-service"
+	}
+	logger := logging.New(serviceName).With("component", "server")
+
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
-		log.Println("DATABASE_URL is required")
+		logger.Error("missing DATABASE_URL")
 		return
 	}
 	pgxCfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
-		log.Printf("parse DATABASE_URL: %v", err)
+		logger.Error("parse DATABASE_URL", "error", err)
 		return
 	}
 
@@ -44,7 +50,7 @@ func main() {
 
 	pool, err := pgxpool.NewWithConfig(ctx, pgxCfg)
 	if err != nil {
-		log.Printf("pgxpool.New: %v", err)
+		logger.Error("pgxpool.New", "error", err)
 		return
 	}
 	defer pool.Close()
@@ -52,37 +58,37 @@ func main() {
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	if err := pool.Ping(pingCtx); err != nil {
 		cancel()
-		log.Printf("postgres ping: %v", err)
+		logger.Error("postgres ping", "error", err)
 		return
 	}
 	cancel()
 
 	userstore, err := postgres.NewUserRepo(pool)
 	if err != nil {
-		log.Printf("failed to create user repo: %v", err)
+		logger.Error("failed to create user repo", "error", err)
 		return
 	}
 
 	appleCfg, err := apple.Load()
 	if err != nil {
-		log.Printf("failed to load apple config: %v", err)
+		logger.Error("failed to load apple config", "error", err)
 		return
 	}
 
 	sessionCfg, err := session.Load()
 	if err != nil {
-		log.Printf("failed to load session config: %v", err)
+		logger.Error("failed to load session config", "error", err)
 		return
 	}
 
 	sessionMgr, err := session.NewManager(sessionCfg)
 	if err != nil {
-		log.Printf("failed to create session manager: %v", err)
+		logger.Error("failed to create session manager", "error", err)
 		return
 	}
 	jwksProvider, ok := sessionMgr.(session.JWKSProvider)
 	if !ok {
-		log.Printf("session manager does not support JWKS publishing")
+		logger.Error("session manager does not support JWKS publishing")
 		return
 	}
 
@@ -92,45 +98,45 @@ func main() {
 	client := &http.Client{Timeout: 10 * time.Second}
 	appleMgr, err := apple.NewManager(appleCfg, cache.NewMemory[rsa.PublicKey](ctx), client)
 	if err != nil {
-		log.Printf("failed to create apple manager: %v", err)
+		logger.Error("failed to create apple manager", "error", err)
 		return
 	}
 
 	sessionSvc, err := sessionx.NewService(userstore, sessionMgr)
 	if err != nil {
-		log.Printf("failed to create session service: %v", err)
+		logger.Error("failed to create session service", "error", err)
 		return
 	}
 	sessionHandler, err := handlers.NewSessionHandler(sessionSvc)
 	if err != nil {
-		log.Printf("failed to create session handler: %v", err)
+		logger.Error("failed to create session handler", "error", err)
 		return
 	}
 
 	registry := idp.NewRegistry()
 	appleProvider, err := idp.NewAppleProvider(appleMgr)
 	if err != nil {
-		log.Printf("failed to create apple provider: %v", err)
+		logger.Error("failed to create apple provider", "error", err)
 		return
 	}
 	if err := registry.Register(appleProvider); err != nil {
-		log.Printf("failed to register apple provider: %v", err)
+		logger.Error("failed to register apple provider", "error", err)
 		return
 	}
 
 	idpSvc, err := idp.NewService(registry, sessionMgr, userstore)
 	if err != nil {
-		log.Printf("failed to create idp service: %v", err)
+		logger.Error("failed to create idp service", "error", err)
 		return
 	}
 	idpHandler, err := handlers.NewIdpHandler(idpSvc)
 	if err != nil {
-		log.Printf("failed to create idp handler: %v", err)
+		logger.Error("failed to create idp handler", "error", err)
 		return
 	}
 	wellKnownHandler, err := handlers.NewWellKnownHandler(sessionCfg.Issuer, jwksProvider)
 	if err != nil {
-		log.Printf("failed to create well-known handler: %v", err)
+		logger.Error("failed to create well-known handler", "error", err)
 		return
 	}
 
@@ -160,9 +166,9 @@ func main() {
 		IdleTimeout:       90 * time.Second,
 	}
 	go func() {
-		log.Println("listening on :" + port)
+		logger.Info("listening", "addr", ":"+port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("http server error: %v", err)
+			logger.Error("http server error", "error", err)
 		}
 	}()
 
@@ -170,6 +176,6 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("graceful shutdown error: %v", err)
+		logger.Error("graceful shutdown error", "error", err)
 	}
 }

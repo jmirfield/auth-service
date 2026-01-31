@@ -2,18 +2,23 @@ package main
 
 import (
 	"context"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jmirfield/auth-service/internals/logging"
 	"github.com/jmirfield/auth-service/internals/repository/postgres"
 )
 
 func main() {
-	log.Printf("prune start")
+	serviceName := os.Getenv("SERVICE_NAME")
+	if serviceName == "" {
+		serviceName = "auth-service"
+	}
+	logger := logging.New(serviceName).With("component", "prune")
+	logger.Info("prune start")
 	base := context.Background()
 	ctx, stop := signal.NotifyContext(base, os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -31,32 +36,32 @@ func main() {
 
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
-		log.Println("DATABASE_URL is required")
+		logger.Error("missing DATABASE_URL")
 		return
 	}
 
 	cfg, err := pgx.ParseConfig(dsn)
 	if err != nil {
-		log.Printf("parse DATABASE_URL: %v", err)
+		logger.Error("parse DATABASE_URL", "error", err)
 		return
 	}
 
 	conn, err := pgx.ConnectConfig(ctx, cfg)
 	if err != nil {
-		log.Printf("connect: %v", err)
+		logger.Error("connect", "error", err)
 		return
 	}
 	defer conn.Close(context.Background())
 
 	repo, err := postgres.NewUserRepoFromQuerier(conn)
 	if err != nil {
-		log.Printf("repo: %v", err)
+		logger.Error("repo", "error", err)
 		return
 	}
 
 	var gotLock bool
 	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", int64(42)).Scan(&gotLock); err != nil {
-		log.Printf("lock: %v", err)
+		logger.Error("lock", "error", err)
 		return
 	}
 	if !gotLock {
@@ -64,7 +69,7 @@ func main() {
 	}
 	defer func() {
 		if _, err := conn.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", int64(42)); err != nil {
-			log.Printf("unlock error: %v", err)
+			logger.Error("unlock error", "error", err)
 		}
 	}()
 
@@ -72,14 +77,14 @@ func main() {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("cancelled/timeout after deleting %d", total)
+			logger.Warn("cancelled/timeout after deleting", "total", total)
 			return
 		default:
 		}
 
 		count, err := repo.PruneExpiredRefreshTokens(ctx, time.Now())
 		if err != nil {
-			log.Printf("prune: %v", err)
+			logger.Error("prune", "error", err)
 			return
 		}
 		total += count
@@ -88,5 +93,5 @@ func main() {
 		}
 	}
 
-	log.Printf("prune complete: deleted=%d", total)
+	logger.Info("prune complete", "deleted", total)
 }

@@ -1,6 +1,6 @@
 # Auth Service
 
-A small Go service that handles Sign in with Apple, session issuance/refresh, and user persistence in Postgres. It uses `pgx` for DB access, a tiny in-memory cache for JWKS, and Goose for SQL migrations.
+Go auth service for Sign in with Apple: RS256 JWT access/refresh, JWKS/OIDC discovery, rate limiting, and Postgres-backed users/identities plus refresh tokens (pgx/Goose).
 
 ## Contents
 
@@ -52,6 +52,10 @@ PORT=3000
 # Rate limits
 RATE_LIMIT_MAX=60
 RATE_LIMIT_WINDOW=1m
+
+# Logging
+LOG_LEVEL=info
+SERVICE_NAME=auth-service
 ```
 
 ## Running with Docker Compose
@@ -109,7 +113,7 @@ services:
 
 - `GET /.well-known/jwks.json`  
   Publish public keys for access/refresh token verification.
-
+  
 - `GET /.well-known/openid-configuration`  
   OIDC discovery metadata (issuer/JWKS/token endpoint).
 
@@ -117,8 +121,3 @@ services:
 Add auth support for:
 - Google
 - Microsoft
-- Others?
-
-Add logging****
-
-Add saving username

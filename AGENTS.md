@@ -1,6 +1,6 @@
 ## Auth Service
 
-Small Go service for third-party sign-in (currently Apple via a provider adapter), session issuance/refresh, and user persistence in Postgres. It issues RS256 JWT access/refresh tokens, publishes JWKS and OpenID discovery metadata, enforces a global in-memory rate limiter across endpoints, and stores hashed refresh tokens plus (provider, sub) identity mappings.
+Small Go service for third-party sign-in (currently Apple via a provider adapter), session issuance/refresh, and user persistence in Postgres. It issues RS256 JWT access/refresh tokens, publishes JWKS and OpenID discovery metadata, enforces a global in-memory rate limiter across endpoints, emits structured JSON logs (service name configurable via SERVICE_NAME), and stores hashed refresh tokens plus (provider, sub) identity mappings.
 
 ## Change Guidelines
 
