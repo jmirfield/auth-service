@@ -22,6 +22,12 @@ type Config struct {
 	ClockSkewLeeway time.Duration
 }
 
+type KeyMaterial struct {
+	KeyID      string
+	PrivateKey *rsa.PrivateKey
+	PublicKeys map[string]*rsa.PublicKey
+}
+
 const (
 	DefaultAccessTTL       = 10 * time.Minute
 	DefaultRefreshTTL      = 30 * 24 * time.Hour
@@ -29,19 +35,8 @@ const (
 )
 
 func (c *Config) Validate() error {
-	if c.KeyID == "" {
-		return errors.New("missing required session key id env var")
-	}
-
-	if c.PrivateKey == nil {
-		return errors.New("missing required session private key")
-	}
-
-	if len(c.PublicKeys) == 0 {
-		return errors.New("missing required session public keys")
-	}
-	if _, ok := c.PublicKeys[c.KeyID]; !ok {
-		return errors.New("active key id missing from public keys")
+	if err := validateKeys(c.KeyID, c.PrivateKey, c.PublicKeys); err != nil {
+		return err
 	}
 
 	if c.Issuer == "" {
@@ -68,45 +63,17 @@ func (c *Config) Validate() error {
 }
 
 func Load() (*Config, error) {
+	keys, err := loadKeysFromEnv()
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
-		KeyID:    os.Getenv("APP_JWT_KEY_ID"),
-		Issuer:   os.Getenv("APP_JWT_ISSUER"),
-		Audience: os.Getenv("APP_JWT_AUDIENCE"),
-	}
-
-	privatePath := os.Getenv("APP_JWT_PRIVATE_KEY_PATH")
-	if privatePath != "" {
-		priv, err := loadRSAPrivateKey(privatePath)
-		if err != nil {
-			return nil, fmt.Errorf("load private key: %w", err)
-		}
-		cfg.PrivateKey = priv
-	}
-
-	cfg.PublicKeys = make(map[string]*rsa.PublicKey)
-	publicKeysEnv := os.Getenv("APP_JWT_PUBLIC_KEYS")
-	if publicKeysEnv != "" {
-		for pair := range strings.SplitSeq(publicKeysEnv, ",") {
-			pair = strings.TrimSpace(pair)
-			if pair == "" {
-				continue
-			}
-			parts := strings.SplitN(pair, ":", 2)
-			if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-				return nil, errors.New("invalid APP_JWT_PUBLIC_KEYS entry, expected kid:path")
-			}
-			pub, err := loadRSAPublicKey(parts[1])
-			if err != nil {
-				return nil, fmt.Errorf("load public key %q: %w", parts[0], err)
-			}
-			cfg.PublicKeys[parts[0]] = pub
-		}
-	}
-
-	if cfg.PrivateKey != nil && cfg.KeyID != "" {
-		if _, ok := cfg.PublicKeys[cfg.KeyID]; !ok {
-			cfg.PublicKeys[cfg.KeyID] = &cfg.PrivateKey.PublicKey
-		}
+		KeyID:      keys.KeyID,
+		PrivateKey: keys.PrivateKey,
+		PublicKeys: keys.PublicKeys,
+		Issuer:     os.Getenv("APP_JWT_ISSUER"),
+		Audience:   os.Getenv("APP_JWT_AUDIENCE"),
 	}
 
 	cfg.AccessLifetime = DefaultAccessTTL
@@ -135,6 +102,82 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func LoadKeysFromEnv() (*KeyMaterial, error) {
+	keys, err := loadKeysFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	if err := validateKeys(keys.KeyID, keys.PrivateKey, keys.PublicKeys); err != nil {
+		return nil, err
+	}
+	return keys, nil
+}
+
+func loadKeysFromEnv() (*KeyMaterial, error) {
+	keyID := os.Getenv("APP_JWT_KEY_ID")
+
+	privatePath := os.Getenv("APP_JWT_PRIVATE_KEY_PATH")
+	var privateKey *rsa.PrivateKey
+	if privatePath != "" {
+		priv, err := loadRSAPrivateKey(privatePath)
+		if err != nil {
+			return nil, fmt.Errorf("load private key: %w", err)
+		}
+		privateKey = priv
+	}
+
+	publicKeys := make(map[string]*rsa.PublicKey)
+	publicKeysEnv := os.Getenv("APP_JWT_PUBLIC_KEYS")
+	if publicKeysEnv != "" {
+		for pair := range strings.SplitSeq(publicKeysEnv, ",") {
+			pair = strings.TrimSpace(pair)
+			if pair == "" {
+				continue
+			}
+			parts := strings.SplitN(pair, ":", 2)
+			if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+				return nil, errors.New("invalid APP_JWT_PUBLIC_KEYS entry, expected kid:path")
+			}
+			pub, err := loadRSAPublicKey(parts[1])
+			if err != nil {
+				return nil, fmt.Errorf("load public key %q: %w", parts[0], err)
+			}
+			publicKeys[parts[0]] = pub
+		}
+	}
+
+	if privateKey != nil && keyID != "" {
+		if _, ok := publicKeys[keyID]; !ok {
+			publicKeys[keyID] = &privateKey.PublicKey
+		}
+	}
+
+	return &KeyMaterial{
+		KeyID:      keyID,
+		PrivateKey: privateKey,
+		PublicKeys: publicKeys,
+	}, nil
+}
+
+func validateKeys(keyID string, privateKey *rsa.PrivateKey, publicKeys map[string]*rsa.PublicKey) error {
+	if keyID == "" {
+		return errors.New("missing required session key id env var")
+	}
+
+	if privateKey == nil {
+		return errors.New("missing required session private key")
+	}
+
+	if len(publicKeys) == 0 {
+		return errors.New("missing required session public keys")
+	}
+	if _, ok := publicKeys[keyID]; !ok {
+		return errors.New("active key id missing from public keys")
+	}
+
+	return nil
 }
 
 func loadRSAPrivateKey(path string) (*rsa.PrivateKey, error) {

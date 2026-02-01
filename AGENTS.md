@@ -7,3 +7,7 @@ Small Go service for third-party sign-in (currently Apple via a provider adapter
 - Update this file whenever functionality is added, changed, or removed.
 - Run `go test ./...` after making changes and ensure tests pass before delivering.
 - When scaling horizontally, prefer rate limiting at the load balancer or a shared store; the in-service limiter is a best-effort backstop.
+
+## Notes
+
+- The session manager can reload JWT key material on an interval via `APP_JWT_KEY_RELOAD_INTERVAL` by re-reading the configured key paths.

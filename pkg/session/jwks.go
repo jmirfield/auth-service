@@ -26,19 +26,23 @@ type JWKSProvider interface {
 }
 
 func (m *Manager) PublicJWKS() (JWKS, error) {
-	if len(m.publicKeys) == 0 {
+	m.mu.RLock()
+	publicKeys := m.publicKeys
+	m.mu.RUnlock()
+
+	if len(publicKeys) == 0 {
 		return JWKS{}, errors.New("no public keys available")
 	}
 
-	keys := make([]string, 0, len(m.publicKeys))
-	for kid := range m.publicKeys {
+	keys := make([]string, 0, len(publicKeys))
+	for kid := range publicKeys {
 		keys = append(keys, kid)
 	}
 	sort.Strings(keys)
 
 	out := JWKS{Keys: make([]JWK, 0, len(keys))}
 	for _, kid := range keys {
-		pub := m.publicKeys[kid]
+		pub := publicKeys[kid]
 		out.Keys = append(out.Keys, rsaPublicJWK(kid, pub))
 	}
 	return out, nil

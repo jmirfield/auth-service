@@ -38,6 +38,33 @@ func newTestMgr(t *testing.T, opts ...func(*Config)) SessionManager {
 	return mgr
 }
 
+func newTestManager(t *testing.T, opts ...func(*Config)) *Manager {
+	t.Helper()
+	key := testRSAKey(t)
+	cfg := &Config{
+		KeyID:           "test-kid",
+		PrivateKey:      key,
+		PublicKeys:      map[string]*rsa.PublicKey{"test-kid": &key.PublicKey},
+		Issuer:          "issuer.test",
+		Audience:        "aud.test",
+		AccessLifetime:  15 * time.Minute,
+		RefreshLifetime: 30 * 24 * time.Hour,
+		ClockSkewLeeway: 30 * time.Second,
+	}
+	for _, o := range opts {
+		o(cfg)
+	}
+	mgrAny, err := NewManager(cfg)
+	if err != nil {
+		t.Fatalf("New manager: %v", err)
+	}
+	mgr, ok := mgrAny.(*Manager)
+	if !ok {
+		t.Fatalf("expected *Manager, got %T", mgrAny)
+	}
+	return mgr
+}
+
 var testKeyOnce sync.Once
 var testKey *rsa.PrivateKey
 
@@ -257,4 +284,78 @@ func TestExpiredTokenRejected(t *testing.T) {
 	if !errors.Is(err, jwt.ErrTokenExpired) {
 		t.Fatalf("expected jwt.ErrTokenExpired, got %v", err)
 	}
+}
+
+func TestUpdateKeysHotSwap(t *testing.T) {
+	mgr := newTestManager(t)
+	key1 := testRSAKey(t)
+
+	userID := uuid.MustParse("b3b9a251-4825-444a-8d4e-5461c1d78b02")
+	oldTok, err := mgr.IssueAccess(t.Context(), userID, nil)
+	if err != nil {
+		t.Fatalf("IssueAccess: %v", err)
+	}
+
+	kid, err := tokenKid(oldTok)
+	if err != nil {
+		t.Fatalf("token kid: %v", err)
+	}
+	if kid != "test-kid" {
+		t.Fatalf("got kid %q, want %q", kid, "test-kid")
+	}
+
+	key2, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate RSA key: %v", err)
+	}
+	newKeys := map[string]*rsa.PublicKey{
+		"test-kid": &key1.PublicKey,
+		"kid-2":    &key2.PublicKey,
+	}
+
+	changed, err := mgr.UpdateKeys("kid-2", key2, newKeys)
+	if err != nil {
+		t.Fatalf("UpdateKeys: %v", err)
+	}
+	if !changed {
+		t.Fatalf("expected UpdateKeys to report changed")
+	}
+
+	newTok, err := mgr.IssueAccess(t.Context(), userID, nil)
+	if err != nil {
+		t.Fatalf("IssueAccess (new key): %v", err)
+	}
+	newKid, err := tokenKid(newTok)
+	if err != nil {
+		t.Fatalf("token kid (new): %v", err)
+	}
+	if newKid != "kid-2" {
+		t.Fatalf("got kid %q, want %q", newKid, "kid-2")
+	}
+
+	if _, err := mgr.ParseAccess(t.Context(), oldTok); err != nil {
+		t.Fatalf("ParseAccess(old): %v", err)
+	}
+	if _, err := mgr.ParseAccess(t.Context(), newTok); err != nil {
+		t.Fatalf("ParseAccess(new): %v", err)
+	}
+
+	changed, err = mgr.UpdateKeys("kid-2", key2, newKeys)
+	if err != nil {
+		t.Fatalf("UpdateKeys (same): %v", err)
+	}
+	if changed {
+		t.Fatalf("expected UpdateKeys to report unchanged")
+	}
+}
+
+func tokenKid(tokenStr string) (string, error) {
+	parser := jwt.NewParser()
+	claims := &Claims{}
+	tok, _, err := parser.ParseUnverified(tokenStr, claims)
+	if err != nil {
+		return "", err
+	}
+	kid, _ := tok.Header["kid"].(string)
+	return kid, nil
 }

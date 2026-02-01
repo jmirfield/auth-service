@@ -33,6 +33,7 @@ APP_JWT_AUDIENCE=auth-service-clients
 APP_JWT_ACCESS_LIFETIME=15m
 APP_JWT_REFRESH_LIFETIME=720h
 APP_JWT_CLOCK_SKEW_LEEWAY=60s
+APP_JWT_KEY_RELOAD_INTERVAL=1m
 
 # Apple Sign In
 APPLE_TEAM_ID=AAAAAAA111
@@ -57,6 +58,9 @@ RATE_LIMIT_WINDOW=1m
 LOG_LEVEL=info
 SERVICE_NAME=auth-service
 ```
+
+Notes:
+- `APP_JWT_KEY_RELOAD_INTERVAL` enables periodic reload of key files (useful when secrets are mounted and rotated without a restart).
 
 ## Running with Docker Compose
 

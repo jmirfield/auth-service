@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"crypto/rsa"
 
 	"github.com/google/uuid"
 )
@@ -13,4 +14,8 @@ type SessionManager interface {
 	ParseAccess(ctx context.Context, tok string) (*Claims, error)
 	ParseRefresh(ctx context.Context, tok string) (*Claims, error)
 	RefreshFrom(ctx context.Context, old string, extra map[string]string, rotate bool) (string, string, error)
+}
+
+type KeyUpdater interface {
+	UpdateKeys(keyID string, privateKey *rsa.PrivateKey, publicKeys map[string]*rsa.PublicKey) (bool, error)
 }

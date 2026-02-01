@@ -86,6 +86,44 @@ func main() {
 		logger.Error("failed to create session manager", "error", err)
 		return
 	}
+	if reloadInterval := os.Getenv("APP_JWT_KEY_RELOAD_INTERVAL"); reloadInterval != "" {
+		interval, err := time.ParseDuration(reloadInterval)
+		if err != nil {
+			logger.Error("invalid APP_JWT_KEY_RELOAD_INTERVAL", "error", err)
+		} else if interval > 0 {
+			keyUpdater, ok := sessionMgr.(session.KeyUpdater)
+			if !ok {
+				logger.Error("session manager does not support key reload")
+			} else {
+				go func() {
+					ticker := time.NewTicker(interval)
+					defer ticker.Stop()
+					for {
+						select {
+						case <-ctx.Done():
+							return
+						case <-ticker.C:
+							keys, err := session.LoadKeysFromEnv()
+							if err != nil {
+								logger.Error("failed to reload session keys", "error", err)
+								continue
+							}
+							changed, err := keyUpdater.UpdateKeys(keys.KeyID, keys.PrivateKey, keys.PublicKeys)
+							if err != nil {
+								logger.Error("failed to update session keys", "error", err)
+								continue
+							}
+							if changed {
+								logger.Info("reloaded session keys", "kid", keys.KeyID, "public_keys", len(keys.PublicKeys))
+							} else {
+								logger.Debug("session keys unchanged")
+							}
+						}
+					}
+				}()
+			}
+		}
+	}
 	jwksProvider, ok := sessionMgr.(session.JWKSProvider)
 	if !ok {
 		logger.Error("session manager does not support JWKS publishing")

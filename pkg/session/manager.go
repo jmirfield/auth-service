@@ -3,8 +3,13 @@ package session
 import (
 	"context"
 	"crypto/rsa"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"sort"
 	"slices"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -23,9 +28,11 @@ type Claims struct {
 }
 
 type Manager struct {
+	mu              sync.RWMutex
 	keyID           string
 	privateKey      *rsa.PrivateKey
 	publicKeys      map[string]*rsa.PublicKey
+	keyFingerprint  string
 	issuer          string
 	audience        string
 	accessTTL       time.Duration
@@ -37,16 +44,17 @@ func NewManager(cfg *Config) (SessionManager, error) {
 	if cfg == nil {
 		return nil, errors.New("missing config")
 	}
-	return &Manager{
-		keyID:           cfg.KeyID,
-		privateKey:      cfg.PrivateKey,
-		publicKeys:      cfg.PublicKeys,
+	mgr := &Manager{
 		issuer:          cfg.Issuer,
 		audience:        cfg.Audience,
 		accessTTL:       cfg.AccessLifetime,
 		refreshTTL:      cfg.RefreshLifetime,
 		clockSkewLeeway: cfg.ClockSkewLeeway,
-	}, nil
+	}
+	if _, err := mgr.UpdateKeys(cfg.KeyID, cfg.PrivateKey, cfg.PublicKeys); err != nil {
+		return nil, err
+	}
+	return mgr, nil
 }
 
 func (m *Manager) IssueAccess(_ context.Context, userID uuid.UUID, attrs map[string]string) (string, error) {
@@ -71,9 +79,43 @@ func (m *Manager) IssuePair(ctx context.Context, userID uuid.UUID, attrs map[str
 	return access, refresh, nil
 }
 
+func (m *Manager) UpdateKeys(keyID string, privateKey *rsa.PrivateKey, publicKeys map[string]*rsa.PublicKey) (bool, error) {
+	if err := validateKeys(keyID, privateKey, publicKeys); err != nil {
+		return false, err
+	}
+
+	normalized := clonePublicKeys(publicKeys)
+	if _, ok := normalized[keyID]; !ok && privateKey != nil {
+		normalized[keyID] = &privateKey.PublicKey
+	}
+
+	fingerprint := keyFingerprint(keyID, normalized)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if fingerprint == m.keyFingerprint {
+		return false, nil
+	}
+
+	m.keyID = keyID
+	m.privateKey = privateKey
+	m.publicKeys = normalized
+	m.keyFingerprint = fingerprint
+	return true, nil
+}
+
 func (m *Manager) issue(userID uuid.UUID, attrs map[string]string, typ string, ttl time.Duration) (string, error) {
 	if userID.String() == "" {
 		return "", errors.New("empty userID")
+	}
+
+	m.mu.RLock()
+	keyID := m.keyID
+	privateKey := m.privateKey
+	m.mu.RUnlock()
+
+	if privateKey == nil {
+		return "", errors.New("missing private key")
 	}
 
 	now := time.Now()
@@ -93,9 +135,9 @@ func (m *Manager) issue(userID uuid.UUID, attrs map[string]string, typ string, t
 		TokenType:        typ,
 		RegisteredClaims: rc,
 	})
-	token.Header["kid"] = m.keyID
+	token.Header["kid"] = keyID
 
-	return token.SignedString(m.privateKey)
+	return token.SignedString(privateKey)
 }
 
 func (m *Manager) ParseAccess(_ context.Context, tokenString string) (*Claims, error) {
@@ -132,6 +174,10 @@ func (m *Manager) parseTyped(tokStr, wantType string) (*Claims, error) {
 		return nil, errors.New("empty token")
 	}
 
+	m.mu.RLock()
+	publicKeys := m.publicKeys
+	m.mu.RUnlock()
+
 	parser := jwt.NewParser(
 		jwt.WithValidMethods([]string{jwt.SigningMethodRS256.Alg()}),
 		jwt.WithLeeway(m.clockSkewLeeway),
@@ -141,15 +187,15 @@ func (m *Manager) parseTyped(tokStr, wantType string) (*Claims, error) {
 	_, err := parser.ParseWithClaims(tokStr, claims, func(t *jwt.Token) (any, error) {
 		kid, _ := t.Header["kid"].(string)
 		if kid == "" {
-			if len(m.publicKeys) == 1 {
-				for _, key := range m.publicKeys {
+			if len(publicKeys) == 1 {
+				for _, key := range publicKeys {
 					return key, nil
 				}
 			}
 			return nil, errors.New("missing kid")
 		}
 
-		key, ok := m.publicKeys[kid]
+		key, ok := publicKeys[kid]
 		if !ok {
 			return nil, errors.New("unknown kid")
 		}
@@ -177,4 +223,32 @@ func (m *Manager) parseTyped(tokStr, wantType string) (*Claims, error) {
 	}
 
 	return claims, nil
+}
+
+func clonePublicKeys(src map[string]*rsa.PublicKey) map[string]*rsa.PublicKey {
+	dst := make(map[string]*rsa.PublicKey, len(src))
+	for kid, key := range src {
+		dst[kid] = key
+	}
+	return dst
+}
+
+func keyFingerprint(keyID string, publicKeys map[string]*rsa.PublicKey) string {
+	h := sha256.New()
+	h.Write([]byte(keyID))
+
+	keys := make([]string, 0, len(publicKeys))
+	for kid := range publicKeys {
+		keys = append(keys, kid)
+	}
+	sort.Strings(keys)
+	for _, kid := range keys {
+		pub := publicKeys[kid]
+		h.Write([]byte(kid))
+		if pub != nil {
+			h.Write(pub.N.Bytes())
+			h.Write([]byte(strconv.Itoa(pub.E)))
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
